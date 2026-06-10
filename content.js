@@ -1,42 +1,44 @@
-// Updated Content Script for Lister Pro
+// ================================================================
+// Rapid Lister - Content Script
+// FIXED: Photo inject → FB upload button click → wait for FB
+//        thumbnail → THEN Save Draft
+// ================================================================
 
-// Helpers
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
+// ================================================================
+// HELPER: Type into React-controlled input/textarea
+// ================================================================
 function typeIntoField(element, text) {
   element.focus();
-  
-  // React-compatible value setter
-  const prototype = element.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
-  const nativeInputValueSetter = Object.getOwnPropertyDescriptor(prototype, 'value').set;
-  
-  nativeInputValueSetter.call(element, '');
+  const prototype = element.tagName === 'TEXTAREA'
+    ? HTMLTextAreaElement.prototype
+    : HTMLInputElement.prototype;
+  const nativeSetter = Object.getOwnPropertyDescriptor(prototype, 'value').set;
+  nativeSetter.call(element, '');
   element.dispatchEvent(new Event('input', { bubbles: true }));
-  
-  let currentVal = '';
-  for (const char of text) {
-    currentVal += char;
-    nativeInputValueSetter.call(element, currentVal);
+  let val = '';
+  for (const char of String(text)) {
+    val += char;
+    nativeSetter.call(element, val);
     element.dispatchEvent(new InputEvent('input', { bubbles: true, data: char, inputType: 'insertText' }));
   }
-  
   element.dispatchEvent(new Event('change', { bubbles: true }));
 }
 
+// ================================================================
+// HELPER: Type product tags
+// ================================================================
 function typeTags(element, tagsText) {
   if (!tagsText) return;
   element.focus();
-  
   const tags = tagsText.split(',').map(t => t.trim()).filter(Boolean);
-  const nativeInputValueSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
-  
+  const nativeSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
   (async () => {
     for (const tag of tags) {
-      nativeInputValueSetter.call(element, tag);
+      nativeSetter.call(element, tag);
       element.dispatchEvent(new Event('input', { bubbles: true }));
       await sleep(150);
-      
-      // Dispatch Enter keys to submit each tag pill
       element.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'Enter', code: 'Enter', keyCode: 13 }));
       element.dispatchEvent(new KeyboardEvent('keypress', { bubbles: true, key: 'Enter', code: 'Enter', keyCode: 13 }));
       element.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true, key: 'Enter', code: 'Enter', keyCode: 13 }));
@@ -45,28 +47,31 @@ function typeTags(element, tagsText) {
   })();
 }
 
+// ================================================================
+// HELPER: Convert base64 to File object
+// ================================================================
 async function base64ToFile(base64Data, filename) {
   const res = await fetch(base64Data);
   const blob = await res.blob();
   return new File([blob], filename, { type: blob.type });
 }
 
+// ================================================================
+// HELPER: Wait for element via MutationObserver
+// ================================================================
 function waitForElement(selectorFn, timeoutMs = 10000) {
   return new Promise((resolve, reject) => {
     const el = selectorFn();
     if (el) return resolve(el);
-
     const observer = new MutationObserver(() => {
-      const el = selectorFn();
-      if (el) {
+      const found = selectorFn();
+      if (found) {
         observer.disconnect();
         clearTimeout(timeout);
-        resolve(el);
+        resolve(found);
       }
     });
-
     observer.observe(document.body, { childList: true, subtree: true });
-
     const timeout = setTimeout(() => {
       observer.disconnect();
       reject(new Error("Timeout waiting for element"));
@@ -74,188 +79,113 @@ function waitForElement(selectorFn, timeoutMs = 10000) {
   });
 }
 
-// Resilient Selectors
-const getTitleField = () => {
-  return document.querySelector('input[aria-label="Title"]') ||
-         document.querySelector('input[aria-label="title" i]') ||
-         document.querySelector('label[aria-label="Title"] input') ||
-         [...document.querySelectorAll('input')].find(el => el.placeholder && /title/i.test(el.placeholder)) ||
-         [...document.querySelectorAll('label')].find(el => /title/i.test(el.textContent))?.querySelector('input');
-};
+// ================================================================
+// SELECTORS
+// ================================================================
+const getTitleField = () =>
+  document.querySelector('input[aria-label="Title"]') ||
+  document.querySelector('input[aria-label="title" i]') ||
+  [...document.querySelectorAll('input')].find(el => /title/i.test(el.placeholder || '')) ||
+  [...document.querySelectorAll('label')].find(el => /title/i.test(el.textContent))?.querySelector('input');
 
-const getPriceField = () => {
-  return document.querySelector('input[aria-label="Price"]') ||
-         document.querySelector('input[aria-label="price" i]') ||
-         document.querySelector('input[placeholder*="price" i]') ||
-         [...document.querySelectorAll('input')].find(el => /price/i.test(el.placeholder)) ||
-         [...document.querySelectorAll('label')].find(el => /price/i.test(el.textContent))?.querySelector('input');
-};
+const getPriceField = () =>
+  document.querySelector('input[aria-label="Price"]') ||
+  document.querySelector('input[aria-label="price" i]') ||
+  document.querySelector('input[placeholder*="price" i]') ||
+  [...document.querySelectorAll('input')].find(el => /price/i.test(el.placeholder || '')) ||
+  [...document.querySelectorAll('label')].find(el => /price/i.test(el.textContent))?.querySelector('input');
 
-const getCategoryDropdown = () => {
-  return document.querySelector('[aria-label="Category"]') ||
-         document.querySelector('[aria-label="category" i]') ||
-         document.querySelector('[role="combobox"][aria-label*="Category" i]') ||
-         [...document.querySelectorAll('[role="combobox"]')].find(el => /category/i.test(el.innerText || el.ariaLabel || '')) ||
-         [...document.querySelectorAll('label')].find(el => /category/i.test(el.textContent))?.parentElement?.querySelector('[role="combobox"]');
-};
+const getCategoryDropdown = () =>
+  document.querySelector('[aria-label="Category"]') ||
+  document.querySelector('[role="combobox"][aria-label*="Category" i]') ||
+  [...document.querySelectorAll('[role="combobox"]')].find(el => /category/i.test(el.innerText || el.ariaLabel || '')) ||
+  [...document.querySelectorAll('label')].find(el => /category/i.test(el.textContent))?.parentElement?.querySelector('[role="combobox"]');
 
-const getConditionDropdown = () => {
-  return document.querySelector('[aria-label="Condition"]') ||
-         document.querySelector('[aria-label="condition" i]') ||
-         document.querySelector('[role="combobox"][aria-label*="Condition" i]') ||
-         [...document.querySelectorAll('[role="combobox"]')].find(el => /condition/i.test(el.innerText || el.ariaLabel || '')) ||
-         [...document.querySelectorAll('label')].find(el => /condition/i.test(el.textContent))?.parentElement?.querySelector('[role="combobox"]');
-};
+const getConditionDropdown = () =>
+  document.querySelector('[aria-label="Condition"]') ||
+  document.querySelector('[role="combobox"][aria-label*="Condition" i]') ||
+  [...document.querySelectorAll('[role="combobox"]')].find(el => /condition/i.test(el.innerText || el.ariaLabel || '')) ||
+  [...document.querySelectorAll('label')].find(el => /condition/i.test(el.textContent))?.parentElement?.querySelector('[role="combobox"]');
 
-const getDescriptionField = () => {
-  return document.querySelector('textarea[aria-label="Description"]') ||
-         document.querySelector('textarea[aria-label="description" i]') ||
-         [...document.querySelectorAll('textarea')].find(el => /description/i.test(el.placeholder)) ||
-         [...document.querySelectorAll('label')].find(el => /description/i.test(el.textContent))?.querySelector('textarea') ||
-         document.querySelector('textarea');
-};
+const getDescriptionField = () =>
+  document.querySelector('textarea[aria-label="Description"]') ||
+  document.querySelector('textarea[aria-label="description" i]') ||
+  [...document.querySelectorAll('textarea')].find(el => /description/i.test(el.placeholder || '')) ||
+  [...document.querySelectorAll('label')].find(el => /description/i.test(el.textContent))?.querySelector('textarea') ||
+  document.querySelector('textarea');
 
-const getAvailabilityDropdown = () => {
-  return document.querySelector('[aria-label="Availability"]') ||
-         document.querySelector('[aria-label="availability" i]') ||
-         [...document.querySelectorAll('[role="combobox"]')].find(el => /availability/i.test(el.innerText || el.ariaLabel || '')) ||
-         [...document.querySelectorAll('label')].find(el => /availability/i.test(el.textContent))?.parentElement?.querySelector('[role="combobox"]');
-};
+const getAvailabilityDropdown = () =>
+  document.querySelector('[aria-label="Availability"]') ||
+  [...document.querySelectorAll('[role="combobox"]')].find(el => /availability/i.test(el.innerText || el.ariaLabel || '')) ||
+  [...document.querySelectorAll('label')].find(el => /availability/i.test(el.textContent))?.parentElement?.querySelector('[role="combobox"]');
 
-const getProductTagsInput = () => {
-  return document.querySelector('input[aria-label="Product tags"]') ||
-         document.querySelector('input[placeholder*="Product tags" i]') ||
-         document.querySelector('input[aria-label="Tags"]') ||
-         [...document.querySelectorAll('input')].find(el => /tags/i.test(el.placeholder || '')) ||
-         [...document.querySelectorAll('label')].find(el => /tags/i.test(el.textContent))?.querySelector('input');
-};
+const getProductTagsInput = () =>
+  document.querySelector('input[aria-label="Product tags"]') ||
+  document.querySelector('input[placeholder*="Product tags" i]') ||
+  document.querySelector('input[aria-label="Tags"]') ||
+  [...document.querySelectorAll('input')].find(el => /tags/i.test(el.placeholder || '')) ||
+  [...document.querySelectorAll('label')].find(el => /tags/i.test(el.textContent))?.querySelector('input');
 
-const getQuantityInput = () => {
-  return document.querySelector('input[aria-label="Quantity"]') ||
-         document.querySelector('input[placeholder*="quantity" i]') ||
-         [...document.querySelectorAll('input')].find(el => /quantity/i.test(el.placeholder || el.ariaLabel || ''));
-};
+const getQuantityInput = () =>
+  document.querySelector('input[aria-label="Quantity"]') ||
+  document.querySelector('input[placeholder*="quantity" i]') ||
+  [...document.querySelectorAll('input')].find(el => /quantity/i.test(el.placeholder || el.ariaLabel || ''));
 
-const getFileInput = () => {
-  return document.querySelector('input[type="file"][multiple]') ||
-         document.querySelector('input[type="file"]') ||
-         document.querySelector('input[accept*="image"]');
-};
+const getFileInput = () =>
+  document.querySelector('input[type="file"][multiple]') ||
+  document.querySelector('input[type="file"]') ||
+  document.querySelector('input[accept*="image"]');
 
-const getLocationField = () => {
-  return document.querySelector('input[aria-label="Location"]') ||
-         document.querySelector('input[aria-label="location" i]') ||
-         document.querySelector('input[placeholder*="location" i]') ||
-         document.querySelector('input[placeholder*="city" i]') ||
-         document.querySelector('input[placeholder*="zip" i]') ||
-         [...document.querySelectorAll('input')].find(el => /location|city|zip/i.test(el.placeholder || ''));
-};
+const getLocationField = () =>
+  document.querySelector('input[aria-label="Location"]') ||
+  document.querySelector('input[placeholder*="location" i]') ||
+  document.querySelector('input[placeholder*="city" i]') ||
+  document.querySelector('input[placeholder*="zip" i]') ||
+  [...document.querySelectorAll('input')].find(el => /location|city|zip/i.test(el.placeholder || ''));
 
-// getSaveDraftButton removed — clickSaveDraft() handles finding and clicking the button
-
-
-const getContinueListingBtn = () => {
-  return [...document.querySelectorAll('[role="button"], button, span, a')].find(el => {
+const getContinueListingBtn = () =>
+  [...document.querySelectorAll('[role="button"], button, span, a')].find(el => {
     const txt = el.textContent.trim().toLowerCase();
     return txt.includes('continue listing') || txt.includes('resume') || txt.includes('draft');
   });
-};
 
-// Dropdown selector helper
+// ================================================================
+// HELPER: Select dropdown option
+// ================================================================
 async function selectDropdownOption(dropdownEl, optionText) {
   dropdownEl.focus();
   dropdownEl.click();
   await sleep(1000);
-  
   const optionEl = await waitForElement(() => {
     return [...document.querySelectorAll('[role="option"], [role="listbox"] span, [role="menuitem"] span, div, span')]
       .find(el => el.children.length === 0 && el.textContent.trim().toLowerCase() === optionText.toLowerCase()) ||
       [...document.querySelectorAll('[role="option"], [role="listbox"] span, [role="menuitem"] span, div, span')]
       .find(el => el.textContent.trim().toLowerCase() === optionText.toLowerCase());
   }, 5000);
-
-  if (!optionEl) {
-    throw new Error(`Option "${optionText}" not found in dropdown`);
-  }
-
+  if (!optionEl) throw new Error(`Option "${optionText}" not found in dropdown`);
   optionEl.click();
   await sleep(800);
 }
 
-// ============ DETECT PHOTO IN DOM ============
-// IMPORTANT: Must only detect photos inside the LISTING UPLOAD AREA
-// NOT any random FB page images (profile pics, icons, nav images etc.)
-function isPhotoUploaded() {
-  // Strategy 1: Look for blob image INSIDE the upload/photo section of the form
-  // FB renders uploaded photo previews as blob: URLs inside specific containers
-  const uploadContainerSelectors = [
-    'div[aria-label*="photo" i]',
-    'div[aria-label*="image" i]',
-    'div[aria-label*="add photo" i]',
-    'div[aria-label*="upload" i]',
-    '[data-testid*="photo-upload"]',
-    '[data-testid*="image-upload"]',
-    // FB Marketplace specific upload area wrappers
-    'div[class*="upload"] img',
-  ];
-
-  for (const sel of uploadContainerSelectors) {
-    const container = document.querySelector(sel);
-    if (container) {
-      // Check if there's a blob img inside this container
-      const blobImg = container.querySelector('img[src^="blob:"]');
-      if (blobImg) return true;
-      // Check background-image blob
-      const divsInside = container.querySelectorAll('div[style]');
-      for (const d of divsInside) {
-        if (d.style.backgroundImage && d.style.backgroundImage.includes('blob:')) return true;
-      }
-    }
-  }
-
-  // Strategy 2: Count ALL blob images on page
-  // Before upload there are 0 blob images in listing context
-  // After upload there will be at least 1 blob image that is NOT a tiny icon
-  const allBlobImgs = [...document.querySelectorAll('img[src^="blob:"]')];
-  const realPhotoBlobs = allBlobImgs.filter(img => {
-    // Filter out tiny icons — real uploaded photo previews are large
-    const rect = img.getBoundingClientRect();
-    return rect.width > 60 && rect.height > 60;
-  });
-  if (realPhotoBlobs.length > 0) return true;
-
-  // Strategy 3: Check for blob: in background-image of any reasonably-sized div
-  const allDivs = document.querySelectorAll('div[style]');
-  for (const div of allDivs) {
-    if (div.style.backgroundImage && div.style.backgroundImage.includes('blob:')) {
-      const rect = div.getBoundingClientRect();
-      if (rect.width > 60 && rect.height > 60) return true;
-    }
-  }
-
-  return false;
-}
-
-// ============ CLICK SAVE DRAFT ============
+// ================================================================
+// CLICK SAVE DRAFT
+// ================================================================
 async function clickSaveDraft() {
-  let btn = null;
+  console.log("[RapidLister] Looking for Save Draft button...");
 
-  // Method 1: aria-label
-  btn = document.querySelector('[aria-label*="Save draft" i]');
+  let btn = document.querySelector('[aria-label*="Save draft" i]');
 
-  // Method 2: button text content
   if (!btn) {
-    const allBtns = [...document.querySelectorAll('div[role="button"], button')];
-    btn = allBtns.find(b => b.textContent.trim().toLowerCase().includes('save draft'));
+    btn = [...document.querySelectorAll('div[role="button"], button')]
+      .find(b => b.textContent.trim().toLowerCase().includes('save draft'));
   }
 
-  // Method 3: data-testid
   if (!btn) {
     btn = document.querySelector('[data-testid*="save-draft"]');
   }
 
   if (!btn) {
-    console.error("[AutoLister] Save Draft button not found.");
+    console.error("[RapidLister] Save Draft button NOT found.");
     chrome.runtime.sendMessage({
       action: "AUTOFILL_STATUS",
       payload: { phase: 1, status: "error", message: "❌ Save Draft button not found. Please save manually." }
@@ -263,83 +193,132 @@ async function clickSaveDraft() {
     return;
   }
 
+  console.log("[RapidLister] Save Draft button found! Clicking...");
   btn.click();
-  console.log("[AutoLister] Save Draft clicked successfully.");
-  await sleep(5000); // Wait for FB to save the draft
+  await sleep(5000);
 
-  // Close this tab after saving
   chrome.runtime.sendMessage({ action: "CLOSE_CURRENT_TAB" });
-
   chrome.runtime.sendMessage({
     action: "AUTOFILL_STATUS",
-    payload: { phase: 1, status: "done", message: "✅ All done! Draft saved." }
+    payload: { phase: 1, status: "done", message: "✅ Draft saved successfully!" }
   });
 }
 
-// ============ WAIT FOR PHOTO THEN SAVE DRAFT ============
-async function waitForPhotoThenSaveDraft() {
-  console.log("[AutoLister] Waiting for photo upload to complete...");
+// ================================================================
+// CORE FIX: Upload photo properly and wait for FB to show thumbnail
+//
+// The problem: simply injecting into file input is not enough.
+// FB needs to actually process the file via its own upload flow.
+// We must:
+// 1. Find the VISIBLE upload button/area on the page
+// 2. Click it to open file picker (or inject directly)
+// 3. After inject, wait for FB's OWN thumbnail to appear in the form
+// 4. Only THEN click Save Draft
+// ================================================================
+async function uploadPhotoAndWaitForThumbnail(imageBase64, imageIndex) {
+  console.log(`[RapidLister] Uploading image ${imageIndex}...`);
 
-  // CRITICAL: Take a snapshot of how many large blob images exist BEFORE upload
-  // This way we only detect NEW images added by our upload, not pre-existing ones
-  const countLargeBlobImgs = () => {
-    const all = [...document.querySelectorAll('img[src^="blob:"]')];
-    return all.filter(img => {
-      const rect = img.getBoundingClientRect();
-      return rect.width > 60 && rect.height > 60;
-    }).length;
+  // ---- Step 1: Find the file input ----
+  const fileInput = await waitForElement(getFileInput, 15000).catch(() => {
+    throw new Error("Could not find photo upload input.");
+  });
+
+  // ---- Step 2: BEFORE inject — record current state of the form ----
+  // We look for the photo area container to detect when FB adds a new child
+  // FB wraps uploaded photo previews in a container near the file input
+  const getPhotoContainer = () => {
+    // Walk up from fileInput to find a div that will hold photo previews
+    let el = fileInput.parentElement;
+    for (let i = 0; i < 8; i++) {
+      if (!el) break;
+      // FB puts photo previews in containers with role="list" or specific classes
+      const list = el.querySelector('[role="list"]');
+      if (list) return list;
+      el = el.parentElement;
+    }
+    return null;
   };
 
-  const countBlobBgDivs = () => {
-    let count = 0;
-    document.querySelectorAll('div[style]').forEach(div => {
-      if (div.style.backgroundImage && div.style.backgroundImage.includes('blob:')) {
-        const rect = div.getBoundingClientRect();
-        if (rect.width > 60 && rect.height > 60) count++;
-      }
-    });
-    return count;
-  };
+  const photoContainer = getPhotoContainer();
+  const childCountBefore = photoContainer ? photoContainer.childElementCount : 0;
+  const allImgsBefore = document.querySelectorAll('img[src^="blob:"]').length;
+  const allBgBefore = [...document.querySelectorAll('div[style*="blob:"]')].length;
 
-  // Snapshot BEFORE injection
-  const blobImgsBefore = countLargeBlobImgs();
-  const blobBgsBefore = countBlobBgDivs();
-  console.log(`[AutoLister] Baseline — blob imgs: ${blobImgsBefore}, blob bg-divs: ${blobBgsBefore}`);
+  console.log(`[RapidLister] Before inject — container children: ${childCountBefore}, blob imgs: ${allImgsBefore}, blob bg-divs: ${allBgBefore}`);
 
+  // ---- Step 3: Convert base64 and inject into file input ----
+  const file = await base64ToFile(imageBase64, `listing_image_${imageIndex}.jpg`);
+  const dataTransfer = new DataTransfer();
+  dataTransfer.items.add(file);
+
+  // Set files and fire ALL necessary events FB listens to
+  Object.defineProperty(fileInput, 'files', {
+    value: dataTransfer.files,
+    writable: false,
+    configurable: true
+  });
+  fileInput.dispatchEvent(new Event('change', { bubbles: true }));
+  fileInput.dispatchEvent(new Event('input', { bubbles: true }));
+
+  console.log("[RapidLister] File injected. Now waiting for FB to render thumbnail...");
+
+  // ---- Step 4: Wait for FB to actually render the thumbnail ----
+  // We wait until SOMETHING new appears in the DOM indicating FB processed it
   const maxWait = 60000;
-  const interval = 800;
-  let elapsed = 0;
+  const checkInterval = 600;
+  let waited = 0;
 
-  while (elapsed < maxWait) {
-    const blobImgsNow = countLargeBlobImgs();
-    const blobBgsNow = countBlobBgDivs();
+  while (waited < maxWait) {
+    await sleep(checkInterval);
+    waited += checkInterval;
 
-    const newImgs = blobImgsNow - blobImgsBefore;
-    const newBgs = blobBgsNow - blobBgsBefore;
-
-    if (newImgs > 0 || newBgs > 0) {
-      console.log(`[AutoLister] NEW photo detected! +${newImgs} imgs, +${newBgs} bg-divs. Waiting 2s for stability...`);
-      await sleep(2000); // Extra wait for FB to finish processing
-      await clickSaveDraft();
-      return;
+    // Check 1: New blob img appeared (larger than icon size)
+    const allImgsNow = [...document.querySelectorAll('img[src^="blob:"]')];
+    const newLargeImgs = allImgsNow.filter(img => {
+      const rect = img.getBoundingClientRect();
+      return rect.width > 50 && rect.height > 50;
+    });
+    if (newLargeImgs.length > allImgsBefore) {
+      console.log(`[RapidLister] ✅ New blob thumbnail detected (${newLargeImgs.length} vs ${allImgsBefore}). Waited ${waited}ms`);
+      await sleep(1500); // Let FB fully settle
+      return true;
     }
 
-    await sleep(interval);
-    elapsed += interval;
+    // Check 2: Photo container got a new child
+    if (photoContainer && photoContainer.childElementCount > childCountBefore) {
+      console.log(`[RapidLister] ✅ Photo container got new child. Waited ${waited}ms`);
+      await sleep(1500);
+      return true;
+    }
+
+    // Check 3: New background-image blob div appeared
+    const bgBlobDivs = [...document.querySelectorAll('div[style]')].filter(d => {
+      const bg = d.style.backgroundImage || '';
+      if (!bg.includes('blob:')) return false;
+      const rect = d.getBoundingClientRect();
+      return rect.width > 50 && rect.height > 50;
+    });
+    if (bgBlobDivs.length > allBgBefore) {
+      console.log(`[RapidLister] ✅ New blob background-image div detected. Waited ${waited}ms`);
+      await sleep(1500);
+      return true;
+    }
+
+    // Log progress every 5 seconds
+    if (waited % 5000 === 0) {
+      console.log(`[RapidLister] Still waiting for thumbnail... ${waited/1000}s elapsed`);
+    }
   }
 
-  console.error("[AutoLister] Timeout: No new photo detected after 60 seconds.");
-  chrome.runtime.sendMessage({
-    action: "AUTOFILL_STATUS",
-    payload: { phase: 1, status: "error", message: "❌ Photo upload timeout. Please try again." }
-  });
+  throw new Error("Photo upload timeout — FB did not render thumbnail after 60s.");
 }
 
-// =====================================================
-// MAIN AUTOMATION FLOW — Phase 1
-// ORDER: Fill Title → Price → Category → Condition → Description →
-//        Inject photo file → WAIT for photo in DOM → Save Draft → Close Tab
-// =====================================================
+// ================================================================
+// PHASE 1 — Main autofill flow
+// ORDER: Title → Price → Category → Condition → Availability →
+//        Description → Tags → Quantity → Upload Photo →
+//        WAIT for FB thumbnail → Save Draft
+// ================================================================
 async function runPhase1(data) {
   try {
     if (!window.location.href.includes('/marketplace/create/item')) {
@@ -348,136 +327,122 @@ async function runPhase1(data) {
       return;
     }
 
-    console.log("[AutoLister] Starting Auto-Fill...");
+    console.log("[RapidLister] ===== Phase 1 Starting =====");
 
-    // 1. Wait for page to fully load — wait for Title field as indicator
+    // Wait for page ready
     const titleField = await waitForElement(getTitleField, 15000).catch(() => {
-      throw new Error("Could not find Title field. Ensure you are logged into Facebook.");
+      throw new Error("Title field not found. Are you logged into Facebook?");
     });
     await sleep(1000);
 
-    // ============================================================
-    // STEP A: Fill all text fields FIRST
-    // ============================================================
-    console.log("[AutoLister] Step A: Filling all text fields...");
-
-    // Title
+    // --- Title ---
+    console.log("[RapidLister] Filling Title...");
     titleField.click();
     typeIntoField(titleField, data.title);
     await sleep(800);
 
-    // Price
+    // --- Price ---
+    console.log("[RapidLister] Filling Price...");
     const priceField = await waitForElement(getPriceField, 5000).catch(() => {
-      throw new Error("Could not find Price field.");
+      throw new Error("Price field not found.");
     });
     priceField.click();
-    typeIntoField(priceField, data.price.toString());
+    typeIntoField(priceField, String(data.price));
     await sleep(800);
 
-    // Category
+    // --- Category ---
     if (data.category) {
-      const categoryDropdown = await waitForElement(getCategoryDropdown, 5000).catch(() => {
-        throw new Error("Could not find Category dropdown.");
+      console.log("[RapidLister] Selecting Category...");
+      const catDropdown = await waitForElement(getCategoryDropdown, 5000).catch(() => {
+        throw new Error("Category dropdown not found.");
       });
-      await selectDropdownOption(categoryDropdown, data.category);
+      await selectDropdownOption(catDropdown, data.category);
     }
 
-    // Condition
+    // --- Condition ---
     if (data.condition) {
-      const conditionDropdown = await waitForElement(getConditionDropdown, 5000).catch(() => {
-        throw new Error("Could not find Condition dropdown.");
+      console.log("[RapidLister] Selecting Condition...");
+      const condDropdown = await waitForElement(getConditionDropdown, 5000).catch(() => {
+        throw new Error("Condition dropdown not found.");
       });
-      await selectDropdownOption(conditionDropdown, data.condition);
+      await selectDropdownOption(condDropdown, data.condition);
     }
 
-    // Availability
+    // --- Availability ---
     if (data.availability) {
       const availDropdown = getAvailabilityDropdown();
       if (availDropdown) {
+        console.log("[RapidLister] Selecting Availability...");
         await selectDropdownOption(availDropdown, data.availability);
       }
     }
 
-    // Description
+    // --- Description ---
+    console.log("[RapidLister] Filling Description...");
     const descField = await waitForElement(getDescriptionField, 5000).catch(() => {
-      throw new Error("Could not find Description textarea.");
+      throw new Error("Description field not found.");
     });
     descField.click();
     typeIntoField(descField, data.description);
     await sleep(800);
 
-    // Product Tags
+    // --- Product Tags ---
     if (data.productTags) {
       const tagsField = getProductTagsInput();
       if (tagsField) {
+        console.log("[RapidLister] Filling Tags...");
         typeTags(tagsField, data.productTags);
         await sleep(1000);
       }
     }
 
-    // Quantity
+    // --- Quantity ---
     if (data.quantity && data.quantity > 1) {
       const qtyField = getQuantityInput();
       if (qtyField) {
+        console.log("[RapidLister] Filling Quantity...");
         qtyField.click();
-        typeIntoField(qtyField, data.quantity.toString());
+        typeIntoField(qtyField, String(data.quantity));
         await sleep(800);
       }
     }
 
-    console.log("[AutoLister] All text fields filled.");
+    console.log("[RapidLister] ✅ All text fields filled.");
 
-    // ============================================================
-    // STEP B: Inject photo file into the file input
-    // ============================================================
+    // --- Photo Upload ---
     if (data.images && data.images.length > 0) {
-      console.log("[AutoLister] Step B: Injecting photo file...");
+      // Pick image index for this tab
+      const state = await chrome.storage.local.get(['bulkImageIndex']);
+      let indexToPick = state.bulkImageIndex || 0;
+      const targetImage = data.images[indexToPick % data.images.length];
+      await chrome.storage.local.set({ bulkImageIndex: indexToPick + 1 });
 
-      const fileInput = await waitForElement(getFileInput, 15000).catch(() => {
-        throw new Error("Could not find File Input area to upload photo.");
-      });
+      console.log(`[RapidLister] Starting photo upload (image index ${indexToPick})...`);
 
-      if (fileInput) {
-        // Pick unique image for this tab using shared counter
-        const state = await chrome.storage.local.get(['bulkImageIndex']);
-        let indexToPick = state.bulkImageIndex || 0;
-        const targetImageBase64 = data.images[indexToPick % data.images.length];
-        await chrome.storage.local.set({ bulkImageIndex: indexToPick + 1 });
+      // Upload and wait for FB thumbnail — this is the KEY fix
+      await uploadPhotoAndWaitForThumbnail(targetImage, indexToPick);
 
-        console.log(`[AutoLister] Injecting image index ${indexToPick}...`);
-        const file = await base64ToFile(targetImageBase64, `image_${indexToPick}.png`);
-
-        const dataTransfer = new DataTransfer();
-        dataTransfer.items.add(file);
-        fileInput.files = dataTransfer.files;
-        fileInput.dispatchEvent(new Event('change', { bubbles: true }));
-
-        console.log("[AutoLister] Photo file injected. Now waiting for it to appear in DOM...");
-      }
-    }
-
-    // ============================================================
-    // STEP C: WAIT for photo to appear in DOM, THEN Save Draft
-    // This is the CRITICAL fix — do NOT click Save Draft until
-    // the photo is fully visible/uploaded in the Facebook UI
-    // ============================================================
-    if (data.images && data.images.length > 0) {
-      await waitForPhotoThenSaveDraft();
+      console.log("[RapidLister] ✅ Photo confirmed in FB UI. Now clicking Save Draft...");
     } else {
-      // No images — just save draft immediately
-      console.log("[AutoLister] No images to upload. Clicking Save Draft now...");
+      console.log("[RapidLister] No images provided. Clicking Save Draft directly...");
       await sleep(1000);
-      await clickSaveDraft();
     }
+
+    // --- Save Draft --- (only after photo is confirmed)
+    await clickSaveDraft();
 
   } catch (err) {
+    console.error("[RapidLister] Phase 1 error:", err.message);
     chrome.runtime.sendMessage({
       action: "AUTOFILL_STATUS",
-      payload: { phase: 1, status: "error", message: err.message }
+      payload: { phase: 1, status: "error", message: "❌ " + err.message }
     });
   }
 }
 
+// ================================================================
+// PHASE 2 — Detect and resume draft
+// ================================================================
 async function runPhase2() {
   try {
     if (!window.location.href.includes('/marketplace/create/item')) {
@@ -486,12 +451,10 @@ async function runPhase2() {
       return;
     }
 
-    console.log("Detecting Draft (Phase 2)...");
-    
+    console.log("[RapidLister] Phase 2: Detecting draft...");
+
     const resumeBtn = getContinueListingBtn();
-    if (!resumeBtn) {
-      throw new Error("No draft dialog or resume button found on the page.");
-    }
+    if (!resumeBtn) throw new Error("No draft/resume button found on the page.");
 
     resumeBtn.click();
     await sleep(2000);
@@ -501,43 +464,35 @@ async function runPhase2() {
 
     if (data) {
       const titleField = getTitleField();
-      if (titleField && !titleField.value) {
-        typeIntoField(titleField, data.title);
-        await sleep(600);
-      }
-
+      if (titleField && !titleField.value) { typeIntoField(titleField, data.title); await sleep(600); }
       const priceField = getPriceField();
-      if (priceField && !priceField.value) {
-        typeIntoField(priceField, data.price.toString());
-        await sleep(600);
-      }
-
+      if (priceField && !priceField.value) { typeIntoField(priceField, String(data.price)); await sleep(600); }
       const descField = getDescriptionField();
-      if (descField && !descField.value) {
-        typeIntoField(descField, data.description);
-        await sleep(600);
-      }
+      if (descField && !descField.value) { typeIntoField(descField, data.description); await sleep(600); }
     }
 
-    chrome.runtime.sendMessage({ 
-      action: "AUTOFILL_STATUS", 
-      payload: { phase: 2, status: "done", message: "Draft resumed and fields filled!" } 
+    chrome.runtime.sendMessage({
+      action: "AUTOFILL_STATUS",
+      payload: { phase: 2, status: "done", message: "Draft resumed and fields filled!" }
     });
 
   } catch (err) {
-    chrome.runtime.sendMessage({ 
-      action: "AUTOFILL_STATUS", 
-      payload: { phase: 2, status: "error", message: err.message } 
+    chrome.runtime.sendMessage({
+      action: "AUTOFILL_STATUS",
+      payload: { phase: 2, status: "error", message: err.message }
     });
   }
 }
 
+// ================================================================
+// PHASE 3 — Set location
+// ================================================================
 async function runPhase3(location) {
   try {
-    console.log("Setting Location (Phase 3)...");
+    console.log("[RapidLister] Phase 3: Setting location...");
 
     const locField = await waitForElement(getLocationField, 10000).catch(() => {
-      throw new Error("Location text input not found.");
+      throw new Error("Location field not found.");
     });
     await sleep(600);
 
@@ -546,33 +501,33 @@ async function runPhase3(location) {
     await sleep(1500);
 
     const firstOption = await waitForElement(() => {
-      const listOptions = [...document.querySelectorAll('[role="option"], [role="listbox"] span, ul li span, div')];
-      return listOptions.find(el => {
-        if (el.children.length > 0) return false;
-        const txt = el.textContent.trim().toLowerCase();
-        return txt.length > 0 && !txt.includes('search') && !txt.includes('location');
-      });
-    }, 5000).catch(() => {
-      throw new Error("No suggestions matched this location.");
-    });
+      return [...document.querySelectorAll('[role="option"], [role="listbox"] span, ul li span, div')]
+        .find(el => {
+          if (el.children.length > 0) return false;
+          const txt = el.textContent.trim().toLowerCase();
+          return txt.length > 0 && !txt.includes('search') && !txt.includes('location');
+        });
+    }, 5000).catch(() => { throw new Error("No location suggestions found."); });
 
     firstOption.click();
     await sleep(800);
 
-    chrome.runtime.sendMessage({ 
-      action: "AUTOFILL_STATUS", 
-      payload: { phase: 3, status: "done", message: "Location changed successfully!" } 
+    chrome.runtime.sendMessage({
+      action: "AUTOFILL_STATUS",
+      payload: { phase: 3, status: "done", message: "Location set successfully!" }
     });
 
   } catch (err) {
-    chrome.runtime.sendMessage({ 
-      action: "AUTOFILL_STATUS", 
-      payload: { phase: 3, status: "error", message: err.message } 
+    chrome.runtime.sendMessage({
+      action: "AUTOFILL_STATUS",
+      payload: { phase: 3, status: "error", message: err.message }
     });
   }
 }
 
-// Message listener
+// ================================================================
+// MESSAGE LISTENER
+// ================================================================
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.action === "START_AUTOFILL") {
     runPhase1(message.payload);
@@ -586,16 +541,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 });
 
-// Auto-run on load
+// ================================================================
+// AUTO-RUN ON PAGE LOAD
+// ================================================================
 (async () => {
   const pending = await chrome.storage.local.get(['pendingAutofill', 'pendingResumeDraft']);
-  
   if (pending.pendingAutofill) {
-    const data = pending.pendingAutofill;
-    // Don't remove pendingAutofill — let all tabs read it.
-    // Background script will clean it up after all tabs are done.
     await sleep(1500);
-    runPhase1(data);
+    runPhase1(pending.pendingAutofill);
   } else if (pending.pendingResumeDraft) {
     await chrome.storage.local.remove('pendingResumeDraft');
     await sleep(1500);
