@@ -226,6 +226,9 @@ document.addEventListener("DOMContentLoaded", () => {
 
       if (action === "START_AUTOFILL") {
         const count = Number(tabsToOpenInput.value || 1);
+        // Reset image index counter so the tabs consume images starting from index 0
+        await chrome.storage.local.set({ bulkImageIndex: 0 });
+
         if (count > 1) {
           showStatus("running", `Opening ${count} tabs concurrently for bulk automation...`);
           chrome.runtime.sendMessage({

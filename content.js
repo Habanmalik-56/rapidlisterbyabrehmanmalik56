@@ -269,39 +269,45 @@ async function runPhase1(data) {
       }
     }
 
-    // 10. Image Uploads (Automated File Injection)
+    // 10. Image Uploads (Automated File Injection - ONLY 1 IMAGE PER TAB FOR MULTI-TAB TABS)
     if (data.images && data.images.length > 0) {
       const fileInput = getFileInput();
       if (fileInput) {
-        console.log(`Converting and uploading ${data.images.length} images...`);
-        const filesToUpload = [];
-        for (let i = 0; i < data.images.length; i++) {
-          const file = await base64ToFile(data.images[i], `image_${i}.png`);
-          filesToUpload.push(file);
-        }
+        // Find which tab/index this is to pick its unique image.
+        // We will fetch from chrome storage how many tabs were opened and which tab/image index this page should consume.
+        const state = await chrome.storage.local.get(['bulkImageIndex', 'tabsToOpen']);
+        let indexToPick = state.bulkImageIndex || 0;
+        
+        // Pick one image based on current index
+        const targetImageBase64 = data.images[indexToPick % data.images.length];
+        
+        // Increment the bulk index in storage for the next tab/instance to consume a different image
+        const nextIndex = indexToPick + 1;
+        await chrome.storage.local.set({ bulkImageIndex: nextIndex });
 
+        console.log(`Injecting unique image index ${indexToPick} for this tab...`);
+        const file = await base64ToFile(targetImageBase64, `image_${indexToPick}.png`);
+        
         const dataTransfer = new DataTransfer();
-        filesToUpload.forEach(f => dataTransfer.items.add(f));
+        dataTransfer.items.add(file);
         fileInput.files = dataTransfer.files;
         fileInput.dispatchEvent(new Event('change', { bubbles: true }));
         
-        console.log("Waiting for images upload rendering to finish...");
-        // Wait for preview thumbnails to render in FB UI (indicated by remove/delete buttons on images)
-        let imagesRendered = false;
+        console.log("Waiting for image upload rendering to finish...");
+        let imageRendered = false;
         for (let attempt = 0; attempt < 30; attempt++) {
           await sleep(1000);
-          // Check for FB image preview item elements or delete buttons
           const previewElements = document.querySelectorAll('img[src^="blob:http"], [aria-label*="Remove Photo" i], [aria-label*="delete" i], [aria-label*="remove" i]');
-          if (previewElements.length >= Math.min(data.images.length, 3)) {
-            imagesRendered = true;
-            console.log("Images found rendering in the UI.");
-            await sleep(1500); // extra breathing room for rest of files
+          if (previewElements.length >= 1) {
+            imageRendered = true;
+            console.log("Image successfully rendered in the UI.");
+            await sleep(1500); 
             break;
           }
         }
-        if (!imagesRendered) {
-          console.log("Warning: Could not confirm images rendering, proceeding anyway.");
-          await sleep(4000); // Fallback wait
+        if (!imageRendered) {
+          console.log("Warning: Image rendering could not be confirmed, waiting fallback...");
+          await sleep(3000);
         }
       }
     }
