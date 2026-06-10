@@ -269,21 +269,23 @@ async function runPhase1(data) {
       }
     }
 
-    // 10. Image Uploads (Automated File Injection - ONLY 1 IMAGE PER TAB FOR MULTI-TAB TABS)
+    // 10. Image Uploads (Automated File Injection - ONLY 1 IMAGE PER TAB IN SEQUENTIAL CYCLE)
     if (data.images && data.images.length > 0) {
-      const fileInput = getFileInput();
+      const fileInput = await waitForElement(getFileInput, 15000).catch(() => {
+        throw new Error("Could not find File Input area to upload photo.");
+      });
+      
       if (fileInput) {
-        // Find which tab/index this is to pick its unique image.
-        // We will fetch from chrome storage how many tabs were opened and which tab/image index this page should consume.
-        const state = await chrome.storage.local.get(['bulkImageIndex', 'tabsToOpen']);
+        // Find which image index this specific tab should take.
+        // We will increment the index in chrome storage *after* we consume it, but atomic lock using local storage.
+        const state = await chrome.storage.local.get(['bulkImageIndex']);
         let indexToPick = state.bulkImageIndex || 0;
         
-        // Pick one image based on current index
+        // Pick one image based on the counter
         const targetImageBase64 = data.images[indexToPick % data.images.length];
         
-        // Increment the bulk index in storage for the next tab/instance to consume a different image
-        const nextIndex = indexToPick + 1;
-        await chrome.storage.local.set({ bulkImageIndex: nextIndex });
+        // Increment for the NEXT tab that calls this function
+        await chrome.storage.local.set({ bulkImageIndex: indexToPick + 1 });
 
         console.log(`Injecting unique image index ${indexToPick} for this tab...`);
         const file = await base64ToFile(targetImageBase64, `image_${indexToPick}.png`);
@@ -293,31 +295,39 @@ async function runPhase1(data) {
         fileInput.files = dataTransfer.files;
         fileInput.dispatchEvent(new Event('change', { bubbles: true }));
         
-        console.log("Waiting for image upload rendering to finish...");
+        console.log("Waiting for photo upload rendering to finish in the UI...");
         let imageRendered = false;
-        for (let attempt = 0; attempt < 30; attempt++) {
+        // Search for Facebook image upload previews (indicated by images containing blob url, or delete/remove buttons)
+        for (let attempt = 0; attempt < 25; attempt++) {
           await sleep(1000);
-          const previewElements = document.querySelectorAll('img[src^="blob:http"], [aria-label*="Remove Photo" i], [aria-label*="delete" i], [aria-label*="remove" i]');
+          const previewElements = document.querySelectorAll('img[src^="blob:http"], [aria-label*="Remove Photo" i], [aria-label*="delete" i], [aria-label*="remove" i], [aria-label*="Photo" i] img');
           if (previewElements.length >= 1) {
             imageRendered = true;
-            console.log("Image successfully rendered in the UI.");
-            await sleep(1500); 
+            console.log("Image verified as rendered in the UI.");
+            await sleep(2000); // Wait 2 extra seconds for FB upload to sync
             break;
           }
         }
         if (!imageRendered) {
-          console.log("Warning: Image rendering could not be confirmed, waiting fallback...");
-          await sleep(3000);
+          console.log("Warning: Image rendering could not be verified in the DOM, waiting fallback...");
+          await sleep(5000); // fallback wait
         }
       }
     }
 
-    // 11. Press next (Save Draft / Publish) ONLY when all filling and image uploads are complete
-    console.log("All fields populated and images uploaded. Saving draft...");
-    const nextBtn = getNextButton();
+    // 11. Press next (Save Draft) ONLY when all filling and image uploads are completely done
+    console.log("All fields populated and images uploaded. Clicking next/save draft...");
+    const nextBtn = await waitForElement(getNextButton, 8000).catch(() => {
+      console.log("Could not find Next/Save button, looking dynamically...");
+      return getNextButton();
+    });
+
     if (nextBtn) {
+      nextBtn.focus();
       nextBtn.click();
-      await sleep(1000);
+      await sleep(1500); // Breathing room
+    } else {
+      console.log("Next/Save button not found at all.");
     }
 
     chrome.runtime.sendMessage({ 
