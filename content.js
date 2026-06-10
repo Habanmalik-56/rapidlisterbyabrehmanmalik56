@@ -152,14 +152,11 @@ const getLocationField = () => {
 };
 
 const getNextButton = () => {
-  return document.querySelector('[aria-label="Next"]') ||
-         document.querySelector('[aria-label="Save Draft"]') ||
-         document.querySelector('[aria-label="Save draft"]') ||
-         document.querySelector('[aria-label="Save"]') ||
-         [...document.querySelectorAll('[role="button"], button, span, div')].find(el => {
-           const txt = el.textContent.trim();
-           return txt === 'Next' || txt === 'Save Draft' || txt === 'Save draft' || txt === 'Save';
-         });
+  // We want to click "Save draft" link or button specifically to save the listing and then close the tab.
+  return [...document.querySelectorAll('[role="button"], button, span, div, a')].find(el => {
+    const txt = el.textContent.trim().toLowerCase();
+    return txt === 'save draft' || txt === 'save' || txt === 'save as draft';
+  }) || document.querySelector('[aria-label="Save draft" i]') || document.querySelector('[aria-label="Save Draft" i]');
 };
 
 const getContinueListingBtn = () => {
@@ -317,19 +314,23 @@ async function runPhase1(data) {
       }
     }
 
-    // 11. Press next (Save Draft) ONLY when all filling and image uploads are completely done
-    console.log("All fields populated and images uploaded. Clicking next/save draft...");
-    const nextBtn = await waitForElement(getNextButton, 8000).catch(() => {
-      console.log("Could not find Next/Save button, looking dynamically...");
+    // 11. Press Save draft ONLY when all filling and image uploads are completely done
+    console.log("All fields populated and images uploaded. Clicking Save draft...");
+    const saveDraftBtn = await waitForElement(getNextButton, 8000).catch(() => {
+      console.log("Could not find Save draft button, looking dynamically...");
       return getNextButton();
     });
 
-    if (nextBtn) {
-      nextBtn.focus();
-      nextBtn.click();
-      await sleep(1500); // Breathing room
+    if (saveDraftBtn) {
+      saveDraftBtn.focus();
+      saveDraftBtn.click();
+      console.log("Save draft button clicked. Waiting 5 seconds for save confirmation before closing tab...");
+      await sleep(5000); // Wait 5 seconds for FB to save the draft in their database
+      
+      // Send message to background script to close this tab
+      chrome.runtime.sendMessage({ action: "CLOSE_CURRENT_TAB" });
     } else {
-      console.log("Next/Save button not found at all.");
+      console.log("Save draft button not found at all.");
     }
 
     chrome.runtime.sendMessage({ 

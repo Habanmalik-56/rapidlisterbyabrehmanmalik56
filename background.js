@@ -28,6 +28,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
+  if (message.action === "CLOSE_CURRENT_TAB") {
+    if (sender.tab && sender.tab.id) {
+      chrome.tabs.remove(sender.tab.id);
+    }
+    sendResponse({ status: "success" });
+    return true;
+  }
+
   if (message.action === "SAVE_PHASE_PROGRESS") {
     chrome.storage.local.set({ phaseProgress: message.data }, () => {
       sendResponse({ status: "success" });
