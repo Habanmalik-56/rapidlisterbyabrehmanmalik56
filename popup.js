@@ -33,6 +33,7 @@ document.addEventListener("DOMContentLoaded", () => {
   
   const locationInput = document.getElementById("location-input");
   const applyLocationBtn = document.getElementById("apply-location-btn");
+  const tabsToOpenInput = document.getElementById("tabs-to-open");
   
   const statusDot = document.getElementById("status-dot");
   const statusTextLabel = document.getElementById("status-text-label");
@@ -124,7 +125,7 @@ document.addEventListener("DOMContentLoaded", () => {
   // --- Save / Load Drafts ---
   async function loadFormData() {
     try {
-      const data = await chrome.storage.local.get(["draftData", "locationData"]);
+      const data = await chrome.storage.local.get(["draftData", "locationData", "tabsToOpen"]);
       
       if (data.draftData) {
         const d = data.draftData;
@@ -145,6 +146,10 @@ document.addEventListener("DOMContentLoaded", () => {
 
       if (data.locationData) {
         locationInput.value = data.locationData;
+      }
+
+      if (data.tabsToOpen) {
+        tabsToOpenInput.value = data.tabsToOpen;
       }
     } catch (e) {
       console.error("Error loading stored data", e);
@@ -167,7 +172,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   async function saveFormData() {
     const draftData = getFormData();
-    await chrome.storage.local.set({ draftData });
+    await chrome.storage.local.set({ draftData, tabsToOpen: Number(tabsToOpenInput.value || 1) });
   }
 
   function triggerAutoSave() {
@@ -178,7 +183,7 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   // Auto-save listeners
-  [priceInput, categorySelect, conditionSelect, availabilitySelect, productTagsInput, quantityInput]
+  [priceInput, categorySelect, conditionSelect, availabilitySelect, productTagsInput, quantityInput, tabsToOpenInput]
     .forEach(input => {
       input.addEventListener("input", triggerAutoSave);
       input.addEventListener("change", triggerAutoSave);
@@ -199,13 +204,14 @@ document.addEventListener("DOMContentLoaded", () => {
     availabilitySelect.value = "List as single item";
     productTagsInput.value = "";
     quantityInput.value = 1;
+    tabsToOpenInput.value = 1;
     selectedImages = [];
     
     titleCounter.textContent = "0 / 100";
     descCounter.textContent = "0 / 5000";
     renderImagePreviews();
     
-    await chrome.storage.local.remove(["draftData"]);
+    await chrome.storage.local.remove(["draftData", "tabsToOpen"]);
     showStatus("success", "Draft data cleared.");
   });
 
@@ -216,6 +222,22 @@ document.addEventListener("DOMContentLoaded", () => {
       if (!tab) {
         showStatus("error", "No active browser tab found.");
         return;
+      }
+
+      if (action === "START_AUTOFILL") {
+        const count = Number(tabsToOpenInput.value || 1);
+        if (count > 1) {
+          showStatus("running", `Opening ${count} tabs concurrently for bulk automation...`);
+          chrome.runtime.sendMessage({
+            action: "OPEN_BULK_TABS",
+            count: count,
+            url: "https://www.facebook.com/marketplace/create/item",
+            payload: payload
+          }, (response) => {
+            showStatus("success", `Opened ${count} listing creator tabs!`);
+          });
+          return;
+        }
       }
 
       if (!tab.url || !tab.url.includes("facebook.com")) {

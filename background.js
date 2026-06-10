@@ -8,6 +8,19 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true; // Keeps the messaging channel open for asynchronous reply
   }
 
+  if (message.action === "OPEN_BULK_TABS") {
+    const { count, url, payload } = message;
+    
+    // Store the payload for the pending tabs
+    chrome.storage.local.set({ pendingAutofill: payload }, () => {
+      for (let i = 0; i < count; i++) {
+        chrome.tabs.create({ url: url });
+      }
+      sendResponse({ status: "success", count });
+    });
+    return true;
+  }
+
   if (message.action === "GET_ACTIVE_TAB") {
     chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
       sendResponse({ tab: tabs && tabs.length > 0 ? tabs[0] : null });

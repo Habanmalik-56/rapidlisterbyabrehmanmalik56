@@ -284,19 +284,39 @@ async function runPhase1(data) {
         filesToUpload.forEach(f => dataTransfer.items.add(f));
         fileInput.files = dataTransfer.files;
         fileInput.dispatchEvent(new Event('change', { bubbles: true }));
-        await sleep(2000); // Allow FB image previews to render
+        
+        console.log("Waiting for images upload rendering to finish...");
+        // Wait for preview thumbnails to render in FB UI (indicated by remove/delete buttons on images)
+        let imagesRendered = false;
+        for (let attempt = 0; attempt < 30; attempt++) {
+          await sleep(1000);
+          // Check for FB image preview item elements or delete buttons
+          const previewElements = document.querySelectorAll('img[src^="blob:http"], [aria-label*="Remove Photo" i], [aria-label*="delete" i], [aria-label*="remove" i]');
+          if (previewElements.length >= Math.min(data.images.length, 3)) {
+            imagesRendered = true;
+            console.log("Images found rendering in the UI.");
+            await sleep(1500); // extra breathing room for rest of files
+            break;
+          }
+        }
+        if (!imagesRendered) {
+          console.log("Warning: Could not confirm images rendering, proceeding anyway.");
+          await sleep(4000); // Fallback wait
+        }
       }
     }
 
-    // 11. Press next
+    // 11. Press next (Save Draft / Publish) ONLY when all filling and image uploads are complete
+    console.log("All fields populated and images uploaded. Saving draft...");
     const nextBtn = getNextButton();
     if (nextBtn) {
       nextBtn.click();
+      await sleep(1000);
     }
 
     chrome.runtime.sendMessage({ 
       action: "AUTOFILL_STATUS", 
-      payload: { phase: 1, status: "done", message: "Listing data auto-filled successfully!" } 
+      payload: { phase: 1, status: "done", message: "Listing data auto-filled successfully and draft saved!" } 
     });
 
   } catch (err) {
