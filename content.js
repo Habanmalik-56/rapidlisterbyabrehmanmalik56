@@ -151,28 +151,8 @@ const getLocationField = () => {
          [...document.querySelectorAll('input')].find(el => /location|city|zip/i.test(el.placeholder || ''));
 };
 
-const getSaveDraftButton = () => {
-  // ONLY match "Save draft" / "Save as draft" — NOT "Save" alone, NOT "Next", NOT any other button
-  const candidates = [...document.querySelectorAll('[role="button"], button, a')];
-  
-  // First: try exact matches only
-  const exactMatch = candidates.find(el => {
-    const txt = el.textContent.trim().toLowerCase();
-    return txt === 'save draft' || txt === 'save as draft';
-  });
-  if (exactMatch) return exactMatch;
+// getSaveDraftButton removed — clickSaveDraft() handles finding and clicking the button
 
-  // Second: aria-label match
-  const ariaMatch = document.querySelector('[aria-label="Save draft" i]') || 
-                     document.querySelector('[aria-label="Save Draft" i]');
-  if (ariaMatch) return ariaMatch;
-
-  // Third: broader search but still strict on "save draft" text
-  return [...document.querySelectorAll('[role="button"], button, span, div, a')].find(el => {
-    const txt = el.textContent.trim().toLowerCase();
-    return txt === 'save draft' || txt === 'save as draft';
-  });
-};
 
 const getContinueListingBtn = () => {
   return [...document.querySelectorAll('[role="button"], button, span, a')].find(el => {
@@ -202,9 +182,105 @@ async function selectDropdownOption(dropdownEl, optionText) {
   await sleep(800);
 }
 
+// ============ DETECT PHOTO IN DOM ============
+function isPhotoUploaded() {
+  // Check blob image (freshly uploaded photo preview)
+  const blobImg = document.querySelector('img[src^="blob:"]');
+  if (blobImg) return true;
+
+  // Check scontent (facebook CDN image preview)
+  const cdnImg = document.querySelector('img[src*="scontent"]');
+  if (cdnImg) return true;
+
+  // Check background-image style (FB sometimes uses this for previews)
+  const allDivs = document.querySelectorAll('div[style]');
+  for (const div of allDivs) {
+    if (div.style.backgroundImage && div.style.backgroundImage.includes('blob:')) {
+      return true;
+    }
+  }
+
+  // Check for any image thumbnail container added after upload
+  const thumbs = document.querySelectorAll(
+    '[data-testid*="photo"], [aria-label*="photo" i], [aria-label*="image" i]'
+  );
+  for (const t of thumbs) {
+    if (t.querySelector('img')) return true;
+  }
+
+  return false;
+}
+
+// ============ CLICK SAVE DRAFT ============
+async function clickSaveDraft() {
+  let btn = null;
+
+  // Method 1: aria-label
+  btn = document.querySelector('[aria-label*="Save draft" i]');
+
+  // Method 2: button text content
+  if (!btn) {
+    const allBtns = [...document.querySelectorAll('div[role="button"], button')];
+    btn = allBtns.find(b => b.textContent.trim().toLowerCase().includes('save draft'));
+  }
+
+  // Method 3: data-testid
+  if (!btn) {
+    btn = document.querySelector('[data-testid*="save-draft"]');
+  }
+
+  if (!btn) {
+    console.error("[AutoLister] Save Draft button not found.");
+    chrome.runtime.sendMessage({
+      action: "AUTOFILL_STATUS",
+      payload: { phase: 1, status: "error", message: "❌ Save Draft button not found. Please save manually." }
+    });
+    return;
+  }
+
+  btn.click();
+  console.log("[AutoLister] Save Draft clicked successfully.");
+  await sleep(5000); // Wait for FB to save the draft
+
+  // Close this tab after saving
+  chrome.runtime.sendMessage({ action: "CLOSE_CURRENT_TAB" });
+
+  chrome.runtime.sendMessage({
+    action: "AUTOFILL_STATUS",
+    payload: { phase: 1, status: "done", message: "✅ All done! Draft saved." }
+  });
+}
+
+// ============ WAIT FOR PHOTO THEN SAVE DRAFT ============
+async function waitForPhotoThenSaveDraft() {
+  console.log("[AutoLister] Waiting for photo upload to complete...");
+
+  const maxWait = 60000; // wait up to 60 seconds
+  const interval = 800;  // check every 800ms
+  let elapsed = 0;
+
+  while (elapsed < maxWait) {
+    if (isPhotoUploaded()) {
+      console.log("[AutoLister] Photo detected! Now clicking Save Draft...");
+      await new Promise(r => setTimeout(r, 1500)); // small extra delay for stability
+      await clickSaveDraft();
+      return;
+    }
+    await new Promise(r => setTimeout(r, interval));
+    elapsed += interval;
+  }
+
+  console.error("[AutoLister] Timeout: No photo detected after 60 seconds.");
+  chrome.runtime.sendMessage({
+    action: "AUTOFILL_STATUS",
+    payload: { phase: 1, status: "error", message: "❌ Photo upload timeout. Please try again." }
+  });
+}
+
 // =====================================================
 // MAIN AUTOMATION FLOW — Phase 1
-// ORDER: Upload Image FIRST → Fill all text fields → THEN Save Draft → Close Tab
+// ORDER: Fill Title → Price → Category → Condition → Description →
+//        Inject photo file → WAIT for photo in DOM → Save Draft → Close Tab
 // =====================================================
 async function runPhase1(data) {
   try {
@@ -214,8 +290,8 @@ async function runPhase1(data) {
       return;
     }
 
-    console.log("Starting Auto-Fill...");
-    
+    console.log("[AutoLister] Starting Auto-Fill...");
+
     // 1. Wait for page to fully load — wait for Title field as indicator
     const titleField = await waitForElement(getTitleField, 15000).catch(() => {
       throw new Error("Could not find Title field. Ensure you are logged into Facebook.");
@@ -223,70 +299,16 @@ async function runPhase1(data) {
     await sleep(1000);
 
     // ============================================================
-    // STEP A: UPLOAD IMAGE FIRST (before any text filling)
-    // This ensures the image is fully uploaded and rendered
-    // before we fill text fields and click Save Draft
+    // STEP A: Fill all text fields FIRST
     // ============================================================
-    let imageUploaded = false;
-    if (data.images && data.images.length > 0) {
-      console.log("Step A: Uploading image FIRST before filling any fields...");
-      
-      const fileInput = await waitForElement(getFileInput, 15000).catch(() => {
-        throw new Error("Could not find File Input area to upload photo.");
-      });
-      
-      if (fileInput) {
-        // Pick unique image for this tab using shared counter
-        const state = await chrome.storage.local.get(['bulkImageIndex']);
-        let indexToPick = state.bulkImageIndex || 0;
-        
-        const targetImageBase64 = data.images[indexToPick % data.images.length];
-        
-        // Increment for the NEXT tab
-        await chrome.storage.local.set({ bulkImageIndex: indexToPick + 1 });
+    console.log("[AutoLister] Step A: Filling all text fields...");
 
-        console.log(`Injecting unique image index ${indexToPick}...`);
-        const file = await base64ToFile(targetImageBase64, `image_${indexToPick}.png`);
-        
-        const dataTransfer = new DataTransfer();
-        dataTransfer.items.add(file);
-        fileInput.files = dataTransfer.files;
-        fileInput.dispatchEvent(new Event('change', { bubbles: true }));
-        
-        // Wait for image to be FULLY uploaded and rendered in the UI
-        console.log("Waiting for photo upload to complete in the UI...");
-        for (let attempt = 0; attempt < 30; attempt++) {
-          await sleep(1000);
-          const previewElements = document.querySelectorAll(
-            'img[src^="blob:http"], [aria-label*="Remove Photo" i], [aria-label*="delete" i], [aria-label*="remove" i], [aria-label*="Photo" i] img'
-          );
-          if (previewElements.length >= 1) {
-            imageUploaded = true;
-            console.log("Image upload confirmed in the UI.");
-            await sleep(3000); // Extra wait for FB to process the image server-side
-            break;
-          }
-        }
-        if (!imageUploaded) {
-          console.log("Warning: Image rendering could not be verified, using fallback wait...");
-          await sleep(8000);
-          imageUploaded = true; // Assume it uploaded after the long wait
-        }
-      }
-    }
-
-    // ============================================================
-    // STEP B: NOW fill all text fields (Title, Price, Category, etc.)
-    // ============================================================
-    console.log("Step B: Filling all text fields...");
-
-    // 2. Title
-    const titleFieldFresh = getTitleField() || titleField;
-    titleFieldFresh.click();
-    typeIntoField(titleFieldFresh, data.title);
+    // Title
+    titleField.click();
+    typeIntoField(titleField, data.title);
     await sleep(800);
 
-    // 3. Price
+    // Price
     const priceField = await waitForElement(getPriceField, 5000).catch(() => {
       throw new Error("Could not find Price field.");
     });
@@ -294,7 +316,7 @@ async function runPhase1(data) {
     typeIntoField(priceField, data.price.toString());
     await sleep(800);
 
-    // 4. Category
+    // Category
     if (data.category) {
       const categoryDropdown = await waitForElement(getCategoryDropdown, 5000).catch(() => {
         throw new Error("Could not find Category dropdown.");
@@ -302,7 +324,7 @@ async function runPhase1(data) {
       await selectDropdownOption(categoryDropdown, data.category);
     }
 
-    // 5. Condition
+    // Condition
     if (data.condition) {
       const conditionDropdown = await waitForElement(getConditionDropdown, 5000).catch(() => {
         throw new Error("Could not find Condition dropdown.");
@@ -310,7 +332,7 @@ async function runPhase1(data) {
       await selectDropdownOption(conditionDropdown, data.condition);
     }
 
-    // 6. Availability
+    // Availability
     if (data.availability) {
       const availDropdown = getAvailabilityDropdown();
       if (availDropdown) {
@@ -318,7 +340,7 @@ async function runPhase1(data) {
       }
     }
 
-    // 7. Description
+    // Description
     const descField = await waitForElement(getDescriptionField, 5000).catch(() => {
       throw new Error("Could not find Description textarea.");
     });
@@ -326,7 +348,7 @@ async function runPhase1(data) {
     typeIntoField(descField, data.description);
     await sleep(800);
 
-    // 8. Product Tags
+    // Product Tags
     if (data.productTags) {
       const tagsField = getProductTagsInput();
       if (tagsField) {
@@ -335,7 +357,7 @@ async function runPhase1(data) {
       }
     }
 
-    // 9. Quantity
+    // Quantity
     if (data.quantity && data.quantity > 1) {
       const qtyField = getQuantityInput();
       if (qtyField) {
@@ -345,40 +367,55 @@ async function runPhase1(data) {
       }
     }
 
-    // ============================================================
-    // STEP C: ALL filling done (image + text). NOW click Save Draft.
-    // ============================================================
-    console.log("Step C: All fields and image are done. Clicking Save Draft...");
-    await sleep(1500); // Small buffer to let React state settle
+    console.log("[AutoLister] All text fields filled.");
 
-    const saveDraftBtn = await waitForElement(getSaveDraftButton, 10000).catch(() => {
-      console.log("Could not find Save draft button via waitForElement, trying direct lookup...");
-      return getSaveDraftButton();
-    });
+    // ============================================================
+    // STEP B: Inject photo file into the file input
+    // ============================================================
+    if (data.images && data.images.length > 0) {
+      console.log("[AutoLister] Step B: Injecting photo file...");
 
-    if (saveDraftBtn) {
-      saveDraftBtn.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      await sleep(500);
-      saveDraftBtn.focus();
-      saveDraftBtn.click();
-      console.log("Save draft button clicked! Waiting for save to complete...");
-      await sleep(6000); // Wait for FB to save the draft
-      
-      // Close this tab
-      chrome.runtime.sendMessage({ action: "CLOSE_CURRENT_TAB" });
-    } else {
-      console.log("Save draft button not found at all.");
+      const fileInput = await waitForElement(getFileInput, 15000).catch(() => {
+        throw new Error("Could not find File Input area to upload photo.");
+      });
+
+      if (fileInput) {
+        // Pick unique image for this tab using shared counter
+        const state = await chrome.storage.local.get(['bulkImageIndex']);
+        let indexToPick = state.bulkImageIndex || 0;
+        const targetImageBase64 = data.images[indexToPick % data.images.length];
+        await chrome.storage.local.set({ bulkImageIndex: indexToPick + 1 });
+
+        console.log(`[AutoLister] Injecting image index ${indexToPick}...`);
+        const file = await base64ToFile(targetImageBase64, `image_${indexToPick}.png`);
+
+        const dataTransfer = new DataTransfer();
+        dataTransfer.items.add(file);
+        fileInput.files = dataTransfer.files;
+        fileInput.dispatchEvent(new Event('change', { bubbles: true }));
+
+        console.log("[AutoLister] Photo file injected. Now waiting for it to appear in DOM...");
+      }
     }
 
-    chrome.runtime.sendMessage({ 
-      action: "AUTOFILL_STATUS", 
-      payload: { phase: 1, status: "done", message: "Listing saved as draft successfully!" } 
-    });
+    // ============================================================
+    // STEP C: WAIT for photo to appear in DOM, THEN Save Draft
+    // This is the CRITICAL fix — do NOT click Save Draft until
+    // the photo is fully visible/uploaded in the Facebook UI
+    // ============================================================
+    if (data.images && data.images.length > 0) {
+      await waitForPhotoThenSaveDraft();
+    } else {
+      // No images — just save draft immediately
+      console.log("[AutoLister] No images to upload. Clicking Save Draft now...");
+      await sleep(1000);
+      await clickSaveDraft();
+    }
 
   } catch (err) {
-    chrome.runtime.sendMessage({ 
-      action: "AUTOFILL_STATUS", 
-      payload: { phase: 1, status: "error", message: err.message } 
+    chrome.runtime.sendMessage({
+      action: "AUTOFILL_STATUS",
+      payload: { phase: 1, status: "error", message: err.message }
     });
   }
 }
