@@ -154,7 +154,9 @@ const getLocationField = () => {
 const getNextButton = () => {
   return document.querySelector('[aria-label="Next"]') ||
          document.querySelector('[aria-label="Save Draft"]') ||
-         [...document.querySelectorAll('[role="button"], button, span')].find(el => {
+         document.querySelector('[aria-label="Save draft"]') ||
+         document.querySelector('[aria-label="Save"]') ||
+         [...document.querySelectorAll('[role="button"], button, span, div')].find(el => {
            const txt = el.textContent.trim();
            return txt === 'Next' || txt === 'Save Draft' || txt === 'Save draft' || txt === 'Save';
          });
@@ -457,7 +459,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   
   if (pending.pendingAutofill) {
     const data = pending.pendingAutofill;
-    await chrome.storage.local.remove('pendingAutofill');
+    // Do NOT remove pendingAutofill immediately so all tabs can read it.
+    // We will clear it after a short delay or keep it as the active session data.
     await sleep(1500);
     runPhase1(data);
   } else if (pending.pendingResumeDraft) {
