@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Lister Pro - FB Marketplace Auto Lister</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <!-- Brand Header Card -->
+  <div class="brand-card">
+    <div class="brand-title">RAPID LISTER</div>
+    <div class="brand-subtitle">Developed by AB Rehman Malik</div>
+    
+    <!-- Neon Avatar Badge -->
+    <div class="avatar-ring">
+      <div class="avatar-inner">
+        <img src="avatar.png.webp" alt="Avatar" style="width: 100%; height: 100%; border-radius: 50%; object-fit: cover;">
+        <span class="pro-tag">PRO</span>
+      </div>
+    </div>
+
+    <div class="welcome-msg">Hello there! Welcome</div>
+  </div>
+
+  <!-- Tab Navigation -->
+  <nav class="tabs-header">
+    <button class="tab-btn active" data-tab="tab-enter-data">Data Entry</button>
+    <button class="tab-btn" data-tab="tab-open-draft">Draft Opener</button>
+    <button class="tab-btn" data-tab="tab-set-location">Locations</button>
+  </nav>
+
+  <!-- Tab 1: Enter Listing Data -->
+  <div id="tab-enter-data" class="tab-content active">
+    <div class="form-group">
+      <input type="text" id="title" placeholder="What are you selling?" maxlength="100">
+      <span class="char-counter" id="title-counter">0 / 100</span>
+    </div>
+
+    <div class="form-group">
+      <div class="input-wrapper">
+        <span class="prefix">$</span>
+        <input type="number" id="price" placeholder="Price" min="0">
+      </div>
+    </div>
+
+    <div class="form-group">
+      <textarea id="description" placeholder="Description (Describe your item...)" maxlength="5000"></textarea>
+      <span class="char-counter" id="description-counter">0 / 5000</span>
+    </div>
+
+    <div class="form-group">
+      <select id="category">
+        <option value="" disabled selected>Select Category</option>
+        <option value="Vehicles">Vehicles</option>
+        <option value="Electronics">Electronics</option>
+        <option value="Clothing">Clothing</option>
+        <option value="Garden & Outdoor">Garden & Outdoor</option>
+        <option value="Toys & Games">Toys & Games</option>
+        <option value="Home Goods">Home Goods</option>
+        <option value="Musical Instruments">Musical Instruments</option>
+        <option value="Office Supplies">Office Supplies</option>
+        <option value="Pet Supplies">Pet Supplies</option>
+        <option value="Sporting Goods">Sporting Goods</option>
+        <option value="Tools">Tools</option>
+        <option value="Books/Movies/Music">Books/Movies/Music</option>
+        <option value="Furniture">Furniture</option>
+        <option value="Baby & Kids">Baby & Kids</option>
+        <option value="Health & Beauty">Health & Beauty</option>
+        <option value="Free Stuff">Free Stuff</option>
+        <option value="Household">Household</option>
+        <option value="Auto Parts">Auto Parts</option>
+        <option value="General">General</option>
+      </select>
+    </div>
+
+    <div class="form-group">
+      <select id="condition">
+        <option value="" disabled selected>Select Condition</option>
+        <option value="New">New</option>
+        <option value="Used - Like New">Used - Like New</option>
+        <option value="Used - Good">Used - Good</option>
+        <option value="Used - Fair">Used - Fair</option>
+        <option value="For Parts">For Parts</option>
+      </select>
+    </div>
+
+    <!-- New: Availability Field -->
+    <div class="form-group">
+      <select id="availability">
+        <option value="List as single item" selected>List as single item</option>
+        <option value="List as in stock">List as in stock</option>
+      </select>
+    </div>
+
+    <!-- New: Product Tags -->
+    <div class="form-group">
+      <input type="text" id="product-tags" placeholder="Product Tags (comma separated)">
+    </div>
+
+    <!-- New: Quantity / SKU -->
+    <div class="form-group">
+      <input type="number" id="quantity" placeholder="Quantity (default 1)" min="1" value="1">
+    </div>
+
+    <!-- New: Image Upload System -->
+    <div class="image-uploader-area">
+      <button class="btn-upload" id="upload-trigger-btn">Upload Product Images</button>
+      <input type="file" id="product-images-input" multiple accept="image/*" style="display: none;">
+      <div class="image-count-label" id="image-count-label">0 Images Selected</div>
+      
+      <!-- Preview Thumbnails -->
+      <div class="image-preview-grid" id="image-preview-grid"></div>
+    </div>
+
+    <div class="action-buttons-container">
+      <button class="btn btn-action-primary" id="save-draft-btn">✅ Submit Information</button>
+      <button class="btn btn-action-outline" id="start-autofill-btn">✅ Manage Listings</button>
+      <button class="btn btn-action-danger" id="clear-all-btn">✅ Clear Data</button>
+    </div>
+  </div>
+
+  <!-- Tab 2: Draft Opener -->
+  <div id="tab-open-draft" class="tab-content">
+    <div class="form-group">
+      <button class="btn btn-action-primary" id="detect-drafts-btn" style="width: 100%;">🔍 Detect & Open Draft</button>
+    </div>
+    
+    <label class="section-label">Detected Drafts</label>
+    <div class="draft-list" id="draft-list-container">
+      <div class="no-drafts">No drafts scanned yet. Click "Detect" above.</div>
+    </div>
+
+    <div class="form-group" style="margin-top: 20px;">
+      <button class="btn btn-action-outline" id="continue-filling-btn" style="width: 100%;">▶️ Continue Autofill</button>
+    </div>
+  </div>
+
+  <!-- Tab 3: Locations -->
+  <div id="tab-set-location" class="tab-content">
+    <div class="form-group">
+      <label class="section-label" for="location-input">City / ZIP Code</label>
+      <input type="text" id="location-input" placeholder="e.g. New York, 10001">
+    </div>
+
+    <div class="form-group" style="margin-top: 20px;">
+      <button class="btn btn-action-primary" id="apply-location-btn" style="width: 100%;">📍 Apply Location</button>
+    </div>
+  </div>
+
+  <!-- Footer Info & WhatsApp -->
+  <div class="popup-footer">
+    <div class="footer-brand">Developed by AB Rehman Malik</div>
+    <a href="https://wa.me/923298073541" target="_blank" class="whatsapp-btn">
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
+        <path d="M.057 24l1.687-6.163c-1.041-1.804-1.588-3.849-1.587-5.946C.003 5.324 5.328 0 11.859 0c3.166.001 6.141 1.233 8.377 3.469 2.235 2.237 3.465 5.212 3.464 8.379-.003 6.535-5.328 11.86-11.859 11.86-2.002-.001-3.973-.51-5.716-1.48L0 24zm6.59-4.846c1.6.95 3.498 1.45 5.432 1.451h.005c5.454 0 9.895-4.442 9.897-9.896.001-2.642-1.025-5.125-2.887-6.988C17.227 1.858 14.746.834 12.102.834h-.01c-5.454 0-9.894 4.44-9.899 9.895-.001 1.996.52 3.942 1.508 5.66l-.999 3.649 3.755-.984zm13.415-8.583c-.302-.15-1.78-.879-2.056-.979-.275-.1-.476-.15-.675.15-.199.299-.773.979-.948 1.179-.175.199-.349.224-.651.075-.3-.15-1.267-.467-2.414-1.49-1.077-.96-1.805-2.146-2.016-2.513-.213-.367-.023-.566.158-.746.162-.162.349-.4.524-.6.175-.2.233-.349.349-.582.116-.233.058-.439-.029-.588-.087-.149-.675-1.628-.925-2.228-.243-.584-.489-.505-.675-.515-.174-.01-.374-.01-.573-.01-.199 0-.524.075-.798.374-.275.299-1.05 1.024-1.05 2.5s1.075 2.9 1.225 3.1c.15.199 2.113 3.227 5.12 4.526.714.31 1.272.496 1.708.635.717.229 1.37.196 1.885.119.574-.086 1.78-.729 2.03-1.433.25-.704.25-1.307.175-1.433-.075-.125-.275-.199-.576-.349z"/>
+      </svg>
+      WhatsApp (CLICK TO CHAT)
+    </a>
+  </div>
+
+  <!-- Global Status Indicator Bar -->
+  <div class="status-bar">
+    <div class="status-header">
+      <span class="status-label">Lister Status</span>
+      <div class="status-indicator">
+        <span class="indicator-dot" id="status-dot"></span>
+        <span id="status-text-label">Idle</span>
+      </div>
+    </div>
+    <div class="status-message" id="status-message">Ready to assist. Fill the form to start.</div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
