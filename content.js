@@ -183,29 +183,54 @@ async function selectDropdownOption(dropdownEl, optionText) {
 }
 
 // ============ DETECT PHOTO IN DOM ============
+// IMPORTANT: Must only detect photos inside the LISTING UPLOAD AREA
+// NOT any random FB page images (profile pics, icons, nav images etc.)
 function isPhotoUploaded() {
-  // Check blob image (freshly uploaded photo preview)
-  const blobImg = document.querySelector('img[src^="blob:"]');
-  if (blobImg) return true;
+  // Strategy 1: Look for blob image INSIDE the upload/photo section of the form
+  // FB renders uploaded photo previews as blob: URLs inside specific containers
+  const uploadContainerSelectors = [
+    'div[aria-label*="photo" i]',
+    'div[aria-label*="image" i]',
+    'div[aria-label*="add photo" i]',
+    'div[aria-label*="upload" i]',
+    '[data-testid*="photo-upload"]',
+    '[data-testid*="image-upload"]',
+    // FB Marketplace specific upload area wrappers
+    'div[class*="upload"] img',
+  ];
 
-  // Check scontent (facebook CDN image preview)
-  const cdnImg = document.querySelector('img[src*="scontent"]');
-  if (cdnImg) return true;
-
-  // Check background-image style (FB sometimes uses this for previews)
-  const allDivs = document.querySelectorAll('div[style]');
-  for (const div of allDivs) {
-    if (div.style.backgroundImage && div.style.backgroundImage.includes('blob:')) {
-      return true;
+  for (const sel of uploadContainerSelectors) {
+    const container = document.querySelector(sel);
+    if (container) {
+      // Check if there's a blob img inside this container
+      const blobImg = container.querySelector('img[src^="blob:"]');
+      if (blobImg) return true;
+      // Check background-image blob
+      const divsInside = container.querySelectorAll('div[style]');
+      for (const d of divsInside) {
+        if (d.style.backgroundImage && d.style.backgroundImage.includes('blob:')) return true;
+      }
     }
   }
 
-  // Check for any image thumbnail container added after upload
-  const thumbs = document.querySelectorAll(
-    '[data-testid*="photo"], [aria-label*="photo" i], [aria-label*="image" i]'
-  );
-  for (const t of thumbs) {
-    if (t.querySelector('img')) return true;
+  // Strategy 2: Count ALL blob images on page
+  // Before upload there are 0 blob images in listing context
+  // After upload there will be at least 1 blob image that is NOT a tiny icon
+  const allBlobImgs = [...document.querySelectorAll('img[src^="blob:"]')];
+  const realPhotoBlobs = allBlobImgs.filter(img => {
+    // Filter out tiny icons — real uploaded photo previews are large
+    const rect = img.getBoundingClientRect();
+    return rect.width > 60 && rect.height > 60;
+  });
+  if (realPhotoBlobs.length > 0) return true;
+
+  // Strategy 3: Check for blob: in background-image of any reasonably-sized div
+  const allDivs = document.querySelectorAll('div[style]');
+  for (const div of allDivs) {
+    if (div.style.backgroundImage && div.style.backgroundImage.includes('blob:')) {
+      const rect = div.getBoundingClientRect();
+      if (rect.width > 60 && rect.height > 60) return true;
+    }
   }
 
   return false;
@@ -255,22 +280,55 @@ async function clickSaveDraft() {
 async function waitForPhotoThenSaveDraft() {
   console.log("[AutoLister] Waiting for photo upload to complete...");
 
-  const maxWait = 60000; // wait up to 60 seconds
-  const interval = 800;  // check every 800ms
+  // CRITICAL: Take a snapshot of how many large blob images exist BEFORE upload
+  // This way we only detect NEW images added by our upload, not pre-existing ones
+  const countLargeBlobImgs = () => {
+    const all = [...document.querySelectorAll('img[src^="blob:"]')];
+    return all.filter(img => {
+      const rect = img.getBoundingClientRect();
+      return rect.width > 60 && rect.height > 60;
+    }).length;
+  };
+
+  const countBlobBgDivs = () => {
+    let count = 0;
+    document.querySelectorAll('div[style]').forEach(div => {
+      if (div.style.backgroundImage && div.style.backgroundImage.includes('blob:')) {
+        const rect = div.getBoundingClientRect();
+        if (rect.width > 60 && rect.height > 60) count++;
+      }
+    });
+    return count;
+  };
+
+  // Snapshot BEFORE injection
+  const blobImgsBefore = countLargeBlobImgs();
+  const blobBgsBefore = countBlobBgDivs();
+  console.log(`[AutoLister] Baseline — blob imgs: ${blobImgsBefore}, blob bg-divs: ${blobBgsBefore}`);
+
+  const maxWait = 60000;
+  const interval = 800;
   let elapsed = 0;
 
   while (elapsed < maxWait) {
-    if (isPhotoUploaded()) {
-      console.log("[AutoLister] Photo detected! Now clicking Save Draft...");
-      await new Promise(r => setTimeout(r, 1500)); // small extra delay for stability
+    const blobImgsNow = countLargeBlobImgs();
+    const blobBgsNow = countBlobBgDivs();
+
+    const newImgs = blobImgsNow - blobImgsBefore;
+    const newBgs = blobBgsNow - blobBgsBefore;
+
+    if (newImgs > 0 || newBgs > 0) {
+      console.log(`[AutoLister] NEW photo detected! +${newImgs} imgs, +${newBgs} bg-divs. Waiting 2s for stability...`);
+      await sleep(2000); // Extra wait for FB to finish processing
       await clickSaveDraft();
       return;
     }
-    await new Promise(r => setTimeout(r, interval));
+
+    await sleep(interval);
     elapsed += interval;
   }
 
-  console.error("[AutoLister] Timeout: No photo detected after 60 seconds.");
+  console.error("[AutoLister] Timeout: No new photo detected after 60 seconds.");
   chrome.runtime.sendMessage({
     action: "AUTOFILL_STATUS",
     payload: { phase: 1, status: "error", message: "❌ Photo upload timeout. Please try again." }
