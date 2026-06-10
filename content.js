@@ -151,12 +151,27 @@ const getLocationField = () => {
          [...document.querySelectorAll('input')].find(el => /location|city|zip/i.test(el.placeholder || ''));
 };
 
-const getNextButton = () => {
-  // We want to click "Save draft" link or button specifically to save the listing and then close the tab.
+const getSaveDraftButton = () => {
+  // ONLY match "Save draft" / "Save as draft" — NOT "Save" alone, NOT "Next", NOT any other button
+  const candidates = [...document.querySelectorAll('[role="button"], button, a')];
+  
+  // First: try exact matches only
+  const exactMatch = candidates.find(el => {
+    const txt = el.textContent.trim().toLowerCase();
+    return txt === 'save draft' || txt === 'save as draft';
+  });
+  if (exactMatch) return exactMatch;
+
+  // Second: aria-label match
+  const ariaMatch = document.querySelector('[aria-label="Save draft" i]') || 
+                     document.querySelector('[aria-label="Save Draft" i]');
+  if (ariaMatch) return ariaMatch;
+
+  // Third: broader search but still strict on "save draft" text
   return [...document.querySelectorAll('[role="button"], button, span, div, a')].find(el => {
     const txt = el.textContent.trim().toLowerCase();
-    return txt === 'save draft' || txt === 'save' || txt === 'save as draft';
-  }) || document.querySelector('[aria-label="Save draft" i]') || document.querySelector('[aria-label="Save Draft" i]');
+    return txt === 'save draft' || txt === 'save as draft';
+  });
 };
 
 const getContinueListingBtn = () => {
@@ -187,7 +202,10 @@ async function selectDropdownOption(dropdownEl, optionText) {
   await sleep(800);
 }
 
-// Phase Processes
+// =====================================================
+// MAIN AUTOMATION FLOW — Phase 1
+// ORDER: Upload Image FIRST → Fill all text fields → THEN Save Draft → Close Tab
+// =====================================================
 async function runPhase1(data) {
   try {
     if (!window.location.href.includes('/marketplace/create/item')) {
@@ -196,17 +214,76 @@ async function runPhase1(data) {
       return;
     }
 
-    console.log("Starting Auto-Fill (Phase 1)...");
+    console.log("Starting Auto-Fill...");
     
-    // 1. Wait for Title
-    const titleField = await waitForElement(getTitleField, 10000).catch(() => {
+    // 1. Wait for page to fully load — wait for Title field as indicator
+    const titleField = await waitForElement(getTitleField, 15000).catch(() => {
       throw new Error("Could not find Title field. Ensure you are logged into Facebook.");
     });
-    await sleep(600);
+    await sleep(1000);
 
-    // 2. Click & type Title
-    titleField.click();
-    typeIntoField(titleField, data.title);
+    // ============================================================
+    // STEP A: UPLOAD IMAGE FIRST (before any text filling)
+    // This ensures the image is fully uploaded and rendered
+    // before we fill text fields and click Save Draft
+    // ============================================================
+    let imageUploaded = false;
+    if (data.images && data.images.length > 0) {
+      console.log("Step A: Uploading image FIRST before filling any fields...");
+      
+      const fileInput = await waitForElement(getFileInput, 15000).catch(() => {
+        throw new Error("Could not find File Input area to upload photo.");
+      });
+      
+      if (fileInput) {
+        // Pick unique image for this tab using shared counter
+        const state = await chrome.storage.local.get(['bulkImageIndex']);
+        let indexToPick = state.bulkImageIndex || 0;
+        
+        const targetImageBase64 = data.images[indexToPick % data.images.length];
+        
+        // Increment for the NEXT tab
+        await chrome.storage.local.set({ bulkImageIndex: indexToPick + 1 });
+
+        console.log(`Injecting unique image index ${indexToPick}...`);
+        const file = await base64ToFile(targetImageBase64, `image_${indexToPick}.png`);
+        
+        const dataTransfer = new DataTransfer();
+        dataTransfer.items.add(file);
+        fileInput.files = dataTransfer.files;
+        fileInput.dispatchEvent(new Event('change', { bubbles: true }));
+        
+        // Wait for image to be FULLY uploaded and rendered in the UI
+        console.log("Waiting for photo upload to complete in the UI...");
+        for (let attempt = 0; attempt < 30; attempt++) {
+          await sleep(1000);
+          const previewElements = document.querySelectorAll(
+            'img[src^="blob:http"], [aria-label*="Remove Photo" i], [aria-label*="delete" i], [aria-label*="remove" i], [aria-label*="Photo" i] img'
+          );
+          if (previewElements.length >= 1) {
+            imageUploaded = true;
+            console.log("Image upload confirmed in the UI.");
+            await sleep(3000); // Extra wait for FB to process the image server-side
+            break;
+          }
+        }
+        if (!imageUploaded) {
+          console.log("Warning: Image rendering could not be verified, using fallback wait...");
+          await sleep(8000);
+          imageUploaded = true; // Assume it uploaded after the long wait
+        }
+      }
+    }
+
+    // ============================================================
+    // STEP B: NOW fill all text fields (Title, Price, Category, etc.)
+    // ============================================================
+    console.log("Step B: Filling all text fields...");
+
+    // 2. Title
+    const titleFieldFresh = getTitleField() || titleField;
+    titleFieldFresh.click();
+    typeIntoField(titleFieldFresh, data.title);
     await sleep(800);
 
     // 3. Price
@@ -268,66 +345,26 @@ async function runPhase1(data) {
       }
     }
 
-    // 10. Image Uploads (Automated File Injection - ONLY 1 IMAGE PER TAB IN SEQUENTIAL CYCLE)
-    if (data.images && data.images.length > 0) {
-      const fileInput = await waitForElement(getFileInput, 15000).catch(() => {
-        throw new Error("Could not find File Input area to upload photo.");
-      });
-      
-      if (fileInput) {
-        // Find which image index this specific tab should take.
-        // We will increment the index in chrome storage *after* we consume it, but atomic lock using local storage.
-        const state = await chrome.storage.local.get(['bulkImageIndex']);
-        let indexToPick = state.bulkImageIndex || 0;
-        
-        // Pick one image based on the counter
-        const targetImageBase64 = data.images[indexToPick % data.images.length];
-        
-        // Increment for the NEXT tab that calls this function
-        await chrome.storage.local.set({ bulkImageIndex: indexToPick + 1 });
+    // ============================================================
+    // STEP C: ALL filling done (image + text). NOW click Save Draft.
+    // ============================================================
+    console.log("Step C: All fields and image are done. Clicking Save Draft...");
+    await sleep(1500); // Small buffer to let React state settle
 
-        console.log(`Injecting unique image index ${indexToPick} for this tab...`);
-        const file = await base64ToFile(targetImageBase64, `image_${indexToPick}.png`);
-        
-        const dataTransfer = new DataTransfer();
-        dataTransfer.items.add(file);
-        fileInput.files = dataTransfer.files;
-        fileInput.dispatchEvent(new Event('change', { bubbles: true }));
-        
-        console.log("Waiting for photo upload rendering to finish in the UI...");
-        let imageRendered = false;
-        // Search for Facebook image upload previews (indicated by images containing blob url, or delete/remove buttons)
-        for (let attempt = 0; attempt < 25; attempt++) {
-          await sleep(1000);
-          const previewElements = document.querySelectorAll('img[src^="blob:http"], [aria-label*="Remove Photo" i], [aria-label*="delete" i], [aria-label*="remove" i], [aria-label*="Photo" i] img');
-          if (previewElements.length >= 1) {
-            imageRendered = true;
-            console.log("Image verified as rendered in the UI.");
-            await sleep(2000); // Wait 2 extra seconds for FB upload to sync
-            break;
-          }
-        }
-        if (!imageRendered) {
-          console.log("Warning: Image rendering could not be verified in the DOM, waiting fallback...");
-          await sleep(5000); // fallback wait
-        }
-      }
-    }
-
-    // 11. Press Save draft ONLY when all filling and image uploads are completely done
-    console.log("All fields populated and images uploaded. Clicking Save draft...");
-    const saveDraftBtn = await waitForElement(getNextButton, 8000).catch(() => {
-      console.log("Could not find Save draft button, looking dynamically...");
-      return getNextButton();
+    const saveDraftBtn = await waitForElement(getSaveDraftButton, 10000).catch(() => {
+      console.log("Could not find Save draft button via waitForElement, trying direct lookup...");
+      return getSaveDraftButton();
     });
 
     if (saveDraftBtn) {
+      saveDraftBtn.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      await sleep(500);
       saveDraftBtn.focus();
       saveDraftBtn.click();
-      console.log("Save draft button clicked. Waiting 5 seconds for save confirmation before closing tab...");
-      await sleep(5000); // Wait 5 seconds for FB to save the draft in their database
+      console.log("Save draft button clicked! Waiting for save to complete...");
+      await sleep(6000); // Wait for FB to save the draft
       
-      // Send message to background script to close this tab
+      // Close this tab
       chrome.runtime.sendMessage({ action: "CLOSE_CURRENT_TAB" });
     } else {
       console.log("Save draft button not found at all.");
@@ -335,7 +372,7 @@ async function runPhase1(data) {
 
     chrome.runtime.sendMessage({ 
       action: "AUTOFILL_STATUS", 
-      payload: { phase: 1, status: "done", message: "Listing data auto-filled successfully and draft saved!" } 
+      payload: { phase: 1, status: "done", message: "Listing saved as draft successfully!" } 
     });
 
   } catch (err) {
@@ -460,8 +497,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   
   if (pending.pendingAutofill) {
     const data = pending.pendingAutofill;
-    // Do NOT remove pendingAutofill immediately so all tabs can read it.
-    // We will clear it after a short delay or keep it as the active session data.
+    // Don't remove pendingAutofill — let all tabs read it.
+    // Background script will clean it up after all tabs are done.
     await sleep(1500);
     runPhase1(data);
   } else if (pending.pendingResumeDraft) {

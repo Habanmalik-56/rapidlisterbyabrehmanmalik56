@@ -238,10 +238,7 @@ document.addEventListener("DOMContentLoaded", () => {
             payload: payload
           }, (response) => {
             showStatus("success", `Opened ${count} listing creator tabs!`);
-            // Clean up the storage key after 8 seconds so future manual page openings do not trigger autofill automatically
-            setTimeout(() => {
-              chrome.storage.local.remove('pendingAutofill');
-            }, 8000);
+            // Background script will clean up pendingAutofill after ALL tabs close
           });
           return;
         }
