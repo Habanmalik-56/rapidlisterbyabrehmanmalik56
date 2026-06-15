@@ -321,7 +321,7 @@ async function runPhase1(data) {
       showPanel("Lister Pro: Autofill", "Step 1: Injecting photo uploader...", 15);
       console.log("[STEP 1] Uploading photo...");
       
-      const fileInput = await waitForElement(getFileInput, 15000).catch(() => null);
+      const fileInput = await waitForElement(getFileInput, 15000);
       if (fileInput) {
         const state = await chrome.storage.local.get(['bulkImageIndex']);
         let indexToPick = state.bulkImageIndex || 0;
@@ -544,6 +544,14 @@ async function startAutoLocation() {
 }
 
 // Check location and run tasks
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message.action === "START_AUTOFILL") {
+    runPhase1(message.payload);
+    sendResponse({ status: "started" });
+  }
+  return true;
+});
+
 chrome.runtime.sendMessage({ action: "GET_TAB_ID" }, (res) => {
   const tabId = res?.tabId;
   const url = window.location.href;
