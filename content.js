@@ -299,8 +299,36 @@ async function runPhase1(data) {
         fileInput.dispatchEvent(new Event('input', { bubbles: true }));
         
         console.log("[STEP 1] Waiting for photo to process...");
-        showPanel("Lister Pro: Autofill", "Processing photo rendering (8s)...", 25);
-        await sleep(8000); // 8 seconds for FB to render photo
+        showPanel("Lister Pro: Autofill", "Processing photo rendering...", 25);
+        
+        // Wait up to 30 seconds for the photo thumbnail to appear in Facebook's UI
+        const isPhotoRendered = () => {
+          // Check for common Facebook media rendering containers/thumbnails
+          const imgs = [...document.querySelectorAll('img')];
+          return imgs.some(img => {
+            const src = img.src || '';
+            const rect = img.getBoundingClientRect();
+            // Look for blob URLs or small rendered preview elements in the listing panel
+            return (src.startsWith('blob:') || src.includes('safe_image') || src.includes('fna')) && rect.width > 30 && rect.height > 30;
+          });
+        };
+        
+        let photoUploaded = false;
+        for (let attempt = 0; attempt < 30; attempt++) {
+          if (isPhotoRendered()) {
+            photoUploaded = true;
+            console.log("[STEP 1] Rendered photo detected!");
+            break;
+          }
+          await sleep(1000);
+        }
+        
+        if (!photoUploaded) {
+          console.log("[STEP 1] Photo element not found in DOM yet, waiting extra 4 seconds...");
+          await sleep(4000);
+        } else {
+          await sleep(2000); // Wait 2 more seconds to let it settle fully
+        }
         console.log("[STEP 1] Photo uploaded successfully!");
       }
     }
