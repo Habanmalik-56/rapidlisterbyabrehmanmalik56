@@ -265,22 +265,34 @@ function showPanel(title, status, progressPct) {
 }
 
 async function waitForMarketplaceImage() {
+    console.log("Waiting for image upload to start...");
+    showPanel("Lister Pro: Autofill", "Starting image upload...", 20);
+    
+    // Give Facebook 3 seconds to register the upload and render progress bar
+    await sleep(3000);
+
     console.log("Waiting for image upload completion...");
+    showPanel("Lister Pro: Autofill", "Uploading image (waiting for completion)...", 25);
+    
     const timeout = Date.now() + 60000;
     while (Date.now() < timeout) {
         const images = [...document.querySelectorAll("img")];
         const uploadedImage = images.find(img => {
             const src = img.src || "";
             return (
-                src.startsWith("blob:") &&
+                (src.startsWith("blob:") || src.includes("fbcdn")) &&
                 img.offsetWidth > 80 &&
                 img.offsetHeight > 80
             );
         });
+
         const progressBar =
-            document.querySelector('[role="progressbar"]');
+            document.querySelector('[role="progressbar"]') ||
+            document.querySelector('[aria-valuemin]');
+
         if (uploadedImage && !progressBar) {
             console.log("Image upload completed");
+            showPanel("Lister Pro: Autofill", "Image upload completed successfully!", 30);
             await sleep(3000);
             return true;
         }
