@@ -102,13 +102,7 @@
       <input type="number" id="quantity" placeholder="Quantity (default 1)" min="1" value="1">
     </div>
 
-    <!-- New: Number of Tabs to Open/List -->
-    <div class="form-group">
-      <label class="section-label" for="tabs-to-open">Number of Tabs to Open (Listings)</label>
-      <input type="number" id="tabs-to-open" placeholder="How many tabs to list? (e.g. 5)" min="1" value="1">
-    </div>
-
-    <!-- New: Image Upload System -->
+    <!-- Image Upload System -->
     <div class="image-uploader-area">
       <button class="btn-upload" id="upload-trigger-btn">Upload Product Images</button>
       <input type="file" id="product-images-input" multiple accept="image/*" style="display: none;">
@@ -118,10 +112,27 @@
       <div class="image-preview-grid" id="image-preview-grid"></div>
     </div>
 
+    <!-- Number of Tabs to Open/List -->
+    <div class="form-group">
+      <label class="section-label" for="tabs-to-open">Number of Tabs (Bulk Mode)</label>
+      <input type="number" id="tabs-to-open" placeholder="How many tabs to list? (e.g. 10)" min="1" value="1">
+    </div>
+
+    <!-- Real-time Progress Bar -->
+    <div class="progress-container" id="bulk-progress-container" style="display: none; margin-bottom: 15px;">
+      <div class="progress-header">
+        <span class="progress-title">Bulk Listing Progress</span>
+        <span class="progress-val" id="bulk-progress-val">0/0</span>
+      </div>
+      <div class="progress-bar-bg">
+        <div class="progress-bar-fill" id="bulk-progress-fill" style="width: 0%;"></div>
+      </div>
+    </div>
+
     <div class="action-buttons-container">
-      <button class="btn btn-action-primary" id="save-draft-btn">✅ Submit Information</button>
-      <button class="btn btn-action-outline" id="start-autofill-btn">✅ Manage Listings</button>
-      <button class="btn btn-action-danger" id="clear-all-btn">✅ Clear Data</button>
+      <button class="btn btn-action-primary" id="start-autofill-btn">⚡ Start Single Listing</button>
+      <button class="btn btn-action-outline" id="start-bulk-btn">⚡ Start Bulk Listing</button>
+      <button class="btn btn-action-danger" id="clear-all-btn">🗑️ Clear Data</button>
     </div>
   </div>
 

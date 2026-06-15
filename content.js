@@ -1,12 +1,174 @@
-// Updated Content Script for Lister Pro
+// Rapid Lister Pro - Content Script
+// Developed by AB Rehman Malik
 
-// Helpers
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
+// Inject Neon Cyberpunk Styles for Floating UIs
+const styleElement = document.createElement("style");
+styleElement.textContent = `
+  .rl-floating-box {
+    position: fixed;
+    bottom: 24px;
+    right: 24px;
+    width: 340px;
+    background-color: #0f0f18 !important;
+    border: 2px solid #222235 !important;
+    border-radius: 12px !important;
+    box-shadow: 0 0 20px rgba(139, 92, 246, 0.4) !important;
+    font-family: 'Inter', system-ui, -apple-system, sans-serif !important;
+    color: #f8fafc !important;
+    z-index: 999999 !important;
+    padding: 16px !important;
+    box-sizing: border-box !important;
+  }
+  .rl-box-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 1px solid #222235 !important;
+    padding-bottom: 10px !important;
+    margin-bottom: 12px !important;
+  }
+  .rl-box-title {
+    font-size: 14px !important;
+    font-weight: 900 !important;
+    letter-spacing: 1.5px !important;
+    background: linear-gradient(135deg, #8b5cf6, #06b6d4) !important;
+    -webkit-background-clip: text !important;
+    -webkit-text-fill-color: transparent !important;
+    text-transform: uppercase !important;
+  }
+  .rl-box-tag {
+    font-size: 9px !important;
+    background: linear-gradient(135deg, #ef4444, #8b5cf6) !important;
+    padding: 2px 6px !important;
+    border-radius: 10px !important;
+    color: white !important;
+    font-weight: 800 !important;
+  }
+  .rl-status-msg {
+    font-size: 12px !important;
+    color: #94a3b8 !important;
+    margin-bottom: 12px !important;
+    line-height: 1.5 !important;
+  }
+  .rl-step-list {
+    list-style: none !important;
+    padding: 0 !important;
+    margin: 0 0 14px 0 !important;
+  }
+  .rl-step-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 11px !important;
+    color: #94a3b8 !important;
+    margin-bottom: 6px !important;
+    text-transform: uppercase;
+  }
+  .rl-step-item.active {
+    color: #06b6d4 !important;
+    font-weight: bold !important;
+  }
+  .rl-step-item.done {
+    color: #8b5cf6 !important;
+  }
+  .rl-step-bullet {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background-color: #222235;
+  }
+  .rl-step-item.active .rl-step-bullet {
+    background-color: #06b6d4 !important;
+    box-shadow: 0 0 6px #06b6d4 !important;
+  }
+  .rl-step-item.done .rl-step-bullet {
+    background-color: #8b5cf6 !important;
+    box-shadow: 0 0 6px #8b5cf6 !important;
+  }
+  .rl-progress-container {
+    margin-top: 10px !important;
+  }
+  .rl-progress-bar-bg {
+    width: 100% !important;
+    height: 6px !important;
+    background-color: #151522 !important;
+    border-radius: 3px !important;
+    overflow: hidden !important;
+  }
+  .rl-progress-bar-fill {
+    height: 100% !important;
+    width: 0%;
+    background: linear-gradient(90deg, #8b5cf6, #06b6d4) !important;
+    box-shadow: 0 0 8px #06b6d4 !important;
+    transition: width 0.3s ease !important;
+  }
+  .rl-btn {
+    width: 100% !important;
+    padding: 8px 12px !important;
+    background: linear-gradient(135deg, #8b5cf6, #06b6d4) !important;
+    color: white !important;
+    border: none !important;
+    border-radius: 6px !important;
+    font-size: 12px !important;
+    font-weight: 700 !important;
+    cursor: pointer !important;
+    text-align: center !important;
+    box-shadow: 0 0 10px rgba(139, 92, 246, 0.3) !important;
+    transition: all 0.2s ease !important;
+  }
+  .rl-btn:hover {
+    filter: brightness(1.1) !important;
+    box-shadow: 0 0 15px rgba(6, 182, 212, 0.5) !important;
+  }
+`;
+document.head.appendChild(styleElement);
+
+// UI Global Variables
+let floatingUIBox = null;
+
+function updateFloatingBox(title, message, progressPct, steps = [], activeStepIndex = -1) {
+  if (!floatingUIBox) {
+    floatingUIBox = document.createElement("div");
+    floatingUIBox.className = "rl-floating-box";
+    document.body.appendChild(floatingUIBox);
+  }
+
+  let stepsHtml = "";
+  if (steps.length > 0) {
+    stepsHtml = `<ul class="rl-step-list">`;
+    steps.forEach((step, idx) => {
+      let stateClass = "";
+      if (idx < activeStepIndex) stateClass = "done";
+      else if (idx === activeStepIndex) stateClass = "active";
+      stepsHtml += `
+        <li class="rl-step-item ${stateClass}">
+          <span class="rl-step-bullet"></span>
+          ${step}
+        </li>`;
+    });
+    stepsHtml += `</ul>`;
+  }
+
+  floatingUIBox.innerHTML = `
+    <div class="rl-box-header">
+      <span class="rl-box-title">${title}</span>
+      <span class="rl-box-tag">PRO</span>
+    </div>
+    <div class="rl-status-msg">${message}</div>
+    ${stepsHtml}
+    <div class="rl-progress-container">
+      <div class="rl-progress-bar-bg">
+        <div class="rl-progress-bar-fill" style="width: ${progressPct}%;"></div>
+      </div>
+    </div>
+  `;
+}
+
+// React-compatible field filling
 function typeIntoField(element, text) {
   element.focus();
-  
-  // React-compatible value setter
   const prototype = element.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
   const nativeInputValueSetter = Object.getOwnPropertyDescriptor(prototype, 'value').set;
   
@@ -26,7 +188,6 @@ function typeIntoField(element, text) {
 function typeTags(element, tagsText) {
   if (!tagsText) return;
   element.focus();
-  
   const tags = tagsText.split(',').map(t => t.trim()).filter(Boolean);
   const nativeInputValueSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
   
@@ -34,9 +195,7 @@ function typeTags(element, tagsText) {
     for (const tag of tags) {
       nativeInputValueSetter.call(element, tag);
       element.dispatchEvent(new Event('input', { bubbles: true }));
-      await sleep(150);
-      
-      // Dispatch Enter keys to submit each tag pill
+      await sleep(200);
       element.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'Enter', code: 'Enter', keyCode: 13 }));
       element.dispatchEvent(new KeyboardEvent('keypress', { bubbles: true, key: 'Enter', code: 'Enter', keyCode: 13 }));
       element.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true, key: 'Enter', code: 'Enter', keyCode: 13 }));
@@ -51,7 +210,7 @@ async function base64ToFile(base64Data, filename) {
   return new File([blob], filename, { type: blob.type });
 }
 
-function waitForElement(selectorFn, timeoutMs = 10000) {
+function waitForElement(selectorFn, timeoutMs = 15000) {
   return new Promise((resolve, reject) => {
     const el = selectorFn();
     if (el) return resolve(el);
@@ -74,395 +233,61 @@ function waitForElement(selectorFn, timeoutMs = 10000) {
   });
 }
 
-// Resilient Selectors
-const getTitleField = () => {
-  return document.querySelector('input[aria-label="Title"]') ||
-         document.querySelector('input[aria-label="title" i]') ||
-         document.querySelector('label[aria-label="Title"] input') ||
-         [...document.querySelectorAll('input')].find(el => el.placeholder && /title/i.test(el.placeholder)) ||
-         [...document.querySelectorAll('label')].find(el => /title/i.test(el.textContent))?.querySelector('input');
-};
+// Dom Selectors
+const getTitleField = () => document.querySelector('input[aria-label="Title"]') || document.querySelector('label[aria-label="Title"] input') || [...document.querySelectorAll('input')].find(el => el.placeholder && /title/i.test(el.placeholder));
+const getPriceField = () => document.querySelector('input[aria-label="Price"]') || [...document.querySelectorAll('input')].find(el => /price/i.test(el.placeholder));
+const getCategoryDropdown = () => document.querySelector('[aria-label="Category"]') || document.querySelector('[role="combobox"][aria-label*="Category" i]') || [...document.querySelectorAll('[role="combobox"]')].find(el => /category/i.test(el.innerText || ''));
+const getConditionDropdown = () => document.querySelector('[aria-label="Condition"]') || document.querySelector('[role="combobox"][aria-label*="Condition" i]') || [...document.querySelectorAll('[role="combobox"]')].find(el => /condition/i.test(el.innerText || ''));
+const getDescriptionField = () => document.querySelector('textarea[aria-label="Description"]') || document.querySelector('textarea');
+const getAvailabilityDropdown = () => document.querySelector('[aria-label="Availability"]') || [...document.querySelectorAll('[role="combobox"]')].find(el => /availability/i.test(el.innerText || ''));
+const getProductTagsInput = () => document.querySelector('input[aria-label="Product tags"]') || [...document.querySelectorAll('input')].find(el => /tags/i.test(el.placeholder || ''));
+const getQuantityInput = () => document.querySelector('input[aria-label="Quantity"]') || [...document.querySelectorAll('input')].find(el => /quantity/i.test(el.placeholder || ''));
+const getFileInput = () => document.querySelector('input[type="file"][multiple]') || document.querySelector('input[type="file"]');
+const getLocationField = () => document.querySelector('input[aria-label="Location"]') || document.querySelector('input[placeholder*="location" i]') || document.querySelector('input[placeholder*="city" i]') || [...document.querySelectorAll('input')].find(el => /location|city/i.test(el.placeholder || ''));
 
-const getPriceField = () => {
-  return document.querySelector('input[aria-label="Price"]') ||
-         document.querySelector('input[aria-label="price" i]') ||
-         document.querySelector('input[placeholder*="price" i]') ||
-         [...document.querySelectorAll('input')].find(el => /price/i.test(el.placeholder)) ||
-         [...document.querySelectorAll('label')].find(el => /price/i.test(el.textContent))?.querySelector('input');
-};
-
-const getCategoryDropdown = () => {
-  return document.querySelector('[aria-label="Category"]') ||
-         document.querySelector('[aria-label="category" i]') ||
-         document.querySelector('[role="combobox"][aria-label*="Category" i]') ||
-         [...document.querySelectorAll('[role="combobox"]')].find(el => /category/i.test(el.innerText || el.ariaLabel || '')) ||
-         [...document.querySelectorAll('label')].find(el => /category/i.test(el.textContent))?.parentElement?.querySelector('[role="combobox"]');
-};
-
-const getConditionDropdown = () => {
-  return document.querySelector('[aria-label="Condition"]') ||
-         document.querySelector('[aria-label="condition" i]') ||
-         document.querySelector('[role="combobox"][aria-label*="Condition" i]') ||
-         [...document.querySelectorAll('[role="combobox"]')].find(el => /condition/i.test(el.innerText || el.ariaLabel || '')) ||
-         [...document.querySelectorAll('label')].find(el => /condition/i.test(el.textContent))?.parentElement?.querySelector('[role="combobox"]');
-};
-
-const getDescriptionField = () => {
-  return document.querySelector('textarea[aria-label="Description"]') ||
-         document.querySelector('textarea[aria-label="description" i]') ||
-         [...document.querySelectorAll('textarea')].find(el => /description/i.test(el.placeholder)) ||
-         [...document.querySelectorAll('label')].find(el => /description/i.test(el.textContent))?.querySelector('textarea') ||
-         document.querySelector('textarea');
-};
-
-const getAvailabilityDropdown = () => {
-  return document.querySelector('[aria-label="Availability"]') ||
-         document.querySelector('[aria-label="availability" i]') ||
-         [...document.querySelectorAll('[role="combobox"]')].find(el => /availability/i.test(el.innerText || el.ariaLabel || '')) ||
-         [...document.querySelectorAll('label')].find(el => /availability/i.test(el.textContent))?.parentElement?.querySelector('[role="combobox"]');
-};
-
-const getProductTagsInput = () => {
-  return document.querySelector('input[aria-label="Product tags"]') ||
-         document.querySelector('input[placeholder*="Product tags" i]') ||
-         document.querySelector('input[aria-label="Tags"]') ||
-         [...document.querySelectorAll('input')].find(el => /tags/i.test(el.placeholder || '')) ||
-         [...document.querySelectorAll('label')].find(el => /tags/i.test(el.textContent))?.querySelector('input');
-};
-
-const getQuantityInput = () => {
-  return document.querySelector('input[aria-label="Quantity"]') ||
-         document.querySelector('input[placeholder*="quantity" i]') ||
-         [...document.querySelectorAll('input')].find(el => /quantity/i.test(el.placeholder || el.ariaLabel || ''));
-};
-
-const getFileInput = () => {
-  return document.querySelector('input[type="file"][multiple]') ||
-         document.querySelector('input[type="file"]') ||
-         document.querySelector('input[accept*="image"]');
-};
-
-const getLocationField = () => {
-  return document.querySelector('input[aria-label="Location"]') ||
-         document.querySelector('input[aria-label="location" i]') ||
-         document.querySelector('input[placeholder*="location" i]') ||
-         document.querySelector('input[placeholder*="city" i]') ||
-         document.querySelector('input[placeholder*="zip" i]') ||
-         [...document.querySelectorAll('input')].find(el => /location|city|zip/i.test(el.placeholder || ''));
-};
-
-// getSaveDraftButton removed — clickSaveDraft() handles finding and clicking the button
-
-
-const getContinueListingBtn = () => {
-  return [...document.querySelectorAll('[role="button"], button, span, a')].find(el => {
-    const txt = el.textContent.trim().toLowerCase();
-    return txt.includes('continue listing') || txt.includes('resume') || txt.includes('draft');
-  });
-};
-
-// Dropdown selector helper
+// Dropdown Helper
 async function selectDropdownOption(dropdownEl, optionText) {
   dropdownEl.focus();
   dropdownEl.click();
-  await sleep(1000);
-  
+  await sleep(600);
   const optionEl = await waitForElement(() => {
     return [...document.querySelectorAll('[role="option"], [role="listbox"] span, [role="menuitem"] span, div, span')]
       .find(el => el.children.length === 0 && el.textContent.trim().toLowerCase() === optionText.toLowerCase()) ||
       [...document.querySelectorAll('[role="option"], [role="listbox"] span, [role="menuitem"] span, div, span')]
       .find(el => el.textContent.trim().toLowerCase() === optionText.toLowerCase());
-  }, 5000);
+  }, 4000);
 
-  if (!optionEl) {
-    throw new Error(`Option "${optionText}" not found in dropdown`);
+  if (optionEl) {
+    optionEl.click();
+    await sleep(600);
   }
-
-  optionEl.click();
-  await sleep(800);
 }
 
-// ============ DETECT PHOTO IN DOM ============
+// Detect Photo
 function isPhotoUploaded() {
-  // Check blob image (freshly uploaded photo preview)
-  const blobImg = document.querySelector('img[src^="blob:"]');
-  if (blobImg) return true;
-
-  // Check scontent (facebook CDN image preview)
-  const cdnImg = document.querySelector('img[src*="scontent"]');
-  if (cdnImg) return true;
-
-  // Check background-image style (FB sometimes uses this for previews)
-  const allDivs = document.querySelectorAll('div[style]');
-  for (const div of allDivs) {
-    if (div.style.backgroundImage && div.style.backgroundImage.includes('blob:')) {
-      return true;
-    }
-  }
-
-  // Check for any image thumbnail container added after upload
-  const thumbs = document.querySelectorAll(
-    '[data-testid*="photo"], [aria-label*="photo" i], [aria-label*="image" i]'
-  );
-  for (const t of thumbs) {
-    if (t.querySelector('img')) return true;
-  }
-
-  return false;
+  return !!(document.querySelector('img[src^="blob:"]') || document.querySelector('img[src*="scontent"]') || document.querySelector('div[style*="blob:"]'));
 }
 
-// ============ CLICK SAVE DRAFT ============
+// Click Save Draft
 async function clickSaveDraft() {
-  let btn = null;
-
-  // Method 1: aria-label
-  btn = document.querySelector('[aria-label*="Save draft" i]');
-
-  // Method 2: button text content
-  if (!btn) {
-    const allBtns = [...document.querySelectorAll('div[role="button"], button')];
-    btn = allBtns.find(b => b.textContent.trim().toLowerCase().includes('save draft'));
-  }
-
-  // Method 3: data-testid
-  if (!btn) {
-    btn = document.querySelector('[data-testid*="save-draft"]');
-  }
+  let btn = document.querySelector('[aria-label*="Save draft" i]') || 
+            [...document.querySelectorAll('div[role="button"], button')].find(b => b.textContent.trim().toLowerCase().includes('save draft')) ||
+            document.querySelector('[data-testid*="save-draft"]');
 
   if (!btn) {
-    console.error("[AutoLister] Save Draft button not found.");
-    chrome.runtime.sendMessage({
-      action: "AUTOFILL_STATUS",
-      payload: { phase: 1, status: "error", message: "❌ Save Draft button not found. Please save manually." }
-    });
-    return;
+    console.error("Save Draft button not found.");
+    return false;
   }
-
   btn.click();
-  console.log("[AutoLister] Save Draft clicked successfully.");
-  await sleep(5000); // Wait for FB to save the draft
-
-  // Close this tab after saving
-  chrome.runtime.sendMessage({ action: "CLOSE_CURRENT_TAB" });
-
-  chrome.runtime.sendMessage({
-    action: "AUTOFILL_STATUS",
-    payload: { phase: 1, status: "done", message: "✅ All done! Draft saved." }
-  });
+  return true;
 }
 
-// ============ WAIT FOR PHOTO THEN SAVE DRAFT ============
-async function waitForPhotoThenSaveDraft() {
-  console.log("[AutoLister] Waiting for photo upload to complete...");
-
-  const maxWait = 60000; // wait up to 60 seconds
-  const interval = 800;  // check every 800ms
-  let elapsed = 0;
-
-  while (elapsed < maxWait) {
-    if (isPhotoUploaded()) {
-      console.log("[AutoLister] Photo detected! Now clicking Save Draft...");
-      await new Promise(r => setTimeout(r, 1500)); // small extra delay for stability
-      await clickSaveDraft();
-      return;
-    }
-    await new Promise(r => setTimeout(r, interval));
-    elapsed += interval;
-  }
-
-  console.error("[AutoLister] Timeout: No photo detected after 60 seconds.");
-  chrome.runtime.sendMessage({
-    action: "AUTOFILL_STATUS",
-    payload: { phase: 1, status: "error", message: "❌ Photo upload timeout. Please try again." }
-  });
-}
-
-// =====================================================
-// MAIN AUTOMATION FLOW — Phase 1
-// NEW ORDER: Photo FIRST → Title → Price → Category →
-//            Condition → Description → Save Draft
-// =====================================================
-async function runPhase1(data) {
-  try {
-    if (!window.location.href.includes('/marketplace/create/item')) {
-      await chrome.storage.local.set({ pendingAutofill: data });
-      window.location.href = 'https://www.facebook.com/marketplace/create/item';
-      return;
-    }
-
-    console.log("Starting Auto-Fill (Phase 1)...");
-    await sleep(2000);
-
-    // ============================================================
-    // STEP 1: PHOTO FIRST — upload image before filling any fields
-    // ============================================================
-    if (data.images && data.images.length > 0) {
-      console.log("Injecting unique image index for this tab...");
-
-      const fileInput = await waitForElement(getFileInput, 15000).catch(() => {
-        throw new Error("Could not find File Input area to upload photo.");
-      });
-
-      const state = await chrome.storage.local.get(['bulkImageIndex']);
-      let indexToPick = state.bulkImageIndex || 0;
-      const targetImageBase64 = data.images[indexToPick % data.images.length];
-      await chrome.storage.local.set({ bulkImageIndex: indexToPick + 1 });
-
-      const file = await base64ToFile(targetImageBase64, `image_${indexToPick}.png`);
-      const dataTransfer = new DataTransfer();
-      dataTransfer.items.add(file);
-      fileInput.files = dataTransfer.files;
-      fileInput.dispatchEvent(new Event('change', { bubbles: true }));
-
-      // Wait 8 seconds for FB to fully process and render the photo
-      console.log("Waiting for photo upload rendering to finish in the UI...");
-      await sleep(8000);
-      console.log("Image verified as rendered in the UI.");
-    }
-
-    // ============================================================
-    // STEP 2: Fill all text fields AFTER photo is done
-    // ============================================================
-    console.log("Filling all text fields now...");
-
-    const titleField = await waitForElement(getTitleField, 15000).catch(() => {
-      throw new Error("Could not find Title field.");
-    });
-    titleField.click();
-    typeIntoField(titleField, data.title);
-    await sleep(800);
-
-    const priceField = await waitForElement(getPriceField, 5000).catch(() => {
-      throw new Error("Could not find Price field.");
-    });
-    priceField.click();
-    typeIntoField(priceField, data.price.toString());
-    await sleep(800);
-
-    if (data.category) {
-      const categoryDropdown = await waitForElement(getCategoryDropdown, 5000).catch(() => {
-        throw new Error("Could not find Category dropdown.");
-      });
-      await selectDropdownOption(categoryDropdown, data.category);
-    }
-
-    if (data.condition) {
-      const conditionDropdown = await waitForElement(getConditionDropdown, 5000).catch(() => {
-        throw new Error("Could not find Condition dropdown.");
-      });
-      await selectDropdownOption(conditionDropdown, data.condition);
-    }
-
-    if (data.availability) {
-      const availDropdown = getAvailabilityDropdown();
-      if (availDropdown) {
-        await selectDropdownOption(availDropdown, data.availability);
-      }
-    }
-
-    const descField = await waitForElement(getDescriptionField, 5000).catch(() => {
-      throw new Error("Could not find Description textarea.");
-    });
-    descField.click();
-    typeIntoField(descField, data.description);
-    await sleep(800);
-
-    if (data.productTags) {
-      const tagsField = getProductTagsInput();
-      if (tagsField) {
-        typeTags(tagsField, data.productTags);
-        await sleep(1000);
-      }
-    }
-
-    if (data.quantity && data.quantity > 1) {
-      const qtyField = getQuantityInput();
-      if (qtyField) {
-        qtyField.click();
-        typeIntoField(qtyField, data.quantity.toString());
-        await sleep(800);
-      }
-    }
-
-    // ============================================================
-    // STEP 3: Save Draft — photo already uploaded, all fields done
-    // ============================================================
-    console.log("All fields populated and images uploaded. Clicking Save draft...");
-    await sleep(1000);
-    await clickSaveDraft();
-
-  } catch (err) {
-    chrome.runtime.sendMessage({
-      action: "AUTOFILL_STATUS",
-      payload: { phase: 1, status: "error", message: err.message }
-    });
-  }
-}
-
-async function runPhase2() {
-  try {
-    if (!window.location.href.includes('/marketplace/create/item')) {
-      await chrome.storage.local.set({ pendingResumeDraft: true });
-      window.location.href = 'https://www.facebook.com/marketplace/create/item';
-      return;
-    }
-
-    console.log("Detecting Draft (Phase 2)...");
-    
-    const resumeBtn = getContinueListingBtn();
-    if (!resumeBtn) {
-      throw new Error("No draft dialog or resume button found on the page.");
-    }
-
-    resumeBtn.click();
-    await sleep(2000);
-
-    const stored = await chrome.storage.local.get(['draftData']);
-    const data = stored.draftData;
-
-    if (data) {
-      const titleField = getTitleField();
-      if (titleField && !titleField.value) {
-        typeIntoField(titleField, data.title);
-        await sleep(600);
-      }
-
-      const priceField = getPriceField();
-      if (priceField && !priceField.value) {
-        typeIntoField(priceField, data.price.toString());
-        await sleep(600);
-      }
-
-      const descField = getDescriptionField();
-      if (descField && !descField.value) {
-        typeIntoField(descField, data.description);
-        await sleep(600);
-      }
-    }
-
-    chrome.runtime.sendMessage({ 
-      action: "AUTOFILL_STATUS", 
-      payload: { phase: 2, status: "done", message: "Draft resumed and fields filled!" } 
-    });
-
-  } catch (err) {
-    chrome.runtime.sendMessage({ 
-      action: "AUTOFILL_STATUS", 
-      payload: { phase: 2, status: "error", message: err.message } 
-    });
-  }
-}
-
+// Phase 3: Set Location
 async function runPhase3(location) {
   try {
-    console.log("Setting Location (Phase 3)...");
-
-    const locField = await waitForElement(getLocationField, 10000).catch(() => {
-      throw new Error("Location text input not found.");
-    });
-    await sleep(600);
-
+    const locField = await waitForElement(getLocationField, 10000);
     locField.click();
+    await sleep(400);
     typeIntoField(locField, location);
     await sleep(1500);
 
@@ -473,53 +298,183 @@ async function runPhase3(location) {
         const txt = el.textContent.trim().toLowerCase();
         return txt.length > 0 && !txt.includes('search') && !txt.includes('location');
       });
-    }, 5000).catch(() => {
-      throw new Error("No suggestions matched this location.");
-    });
+    }, 5000);
 
     firstOption.click();
-    await sleep(800);
+    await sleep(600);
+    return true;
+  } catch (err) {
+    console.error("Error setting location:", err);
+    return false;
+  }
+}
 
-    chrome.runtime.sendMessage({ 
-      action: "AUTOFILL_STATUS", 
-      payload: { phase: 3, status: "done", message: "Location changed successfully!" } 
-    });
+// Phase 1: Autofill Workflow
+async function runPhase1(data) {
+  const steps = ["Photo Upload", "Text Fields", "Dropdowns", "Location", "Save Draft"];
+  updateFloatingBox("Lister Pro: AI Auto-Filling", "Starting Phase 1 Autofill...", 10, steps, 0);
+  
+  try {
+    await sleep(1500);
+
+    // 1. Photo First
+    if (data.images && data.images.length > 0) {
+      updateFloatingBox("Lister Pro: AI Auto-Filling", "Uploading listing image...", 20, steps, 0);
+      const fileInput = await waitForElement(getFileInput, 15000);
+      
+      let indexToPick = data.imageIndex !== undefined ? data.imageIndex : 0;
+      const targetImageBase64 = data.images[indexToPick % data.images.length];
+      
+      const file = await base64ToFile(targetImageBase64, `image_${indexToPick}.png`);
+      const dataTransfer = new DataTransfer();
+      dataTransfer.items.add(file);
+      fileInput.files = dataTransfer.files;
+      fileInput.dispatchEvent(new Event('change', { bubbles: true }));
+
+      // Wait for photo preview to be visible in DOM
+      let photoCheck = 0;
+      while (photoCheck < 15 && !isPhotoUploaded()) {
+        await sleep(600);
+        photoCheck++;
+      }
+      await sleep(1500); // short stabilization delay
+    }
+
+    // 2. Text Fields
+    updateFloatingBox("Lister Pro: AI Auto-Filling", "Filling title, price & description...", 40, steps, 1);
+    const titleField = await waitForElement(getTitleField, 10000);
+    typeIntoField(titleField, data.title);
+    await sleep(300);
+
+    const priceField = await waitForElement(getPriceField, 5000);
+    typeIntoField(priceField, data.price.toString());
+    await sleep(300);
+
+    const descField = await waitForElement(getDescriptionField, 5000);
+    typeIntoField(descField, data.description);
+    await sleep(400);
+
+    // 3. Dropdowns
+    updateFloatingBox("Lister Pro: AI Auto-Filling", "Applying categories & conditions...", 60, steps, 2);
+    if (data.category) {
+      const catDropdown = await waitForElement(getCategoryDropdown, 5000);
+      await selectDropdownOption(catDropdown, data.category);
+    }
+    if (data.condition) {
+      const condDropdown = await waitForElement(getConditionDropdown, 5000);
+      await selectDropdownOption(condDropdown, data.condition);
+    }
+    if (data.availability) {
+      const availDropdown = getAvailabilityDropdown();
+      if (availDropdown) await selectDropdownOption(availDropdown, data.availability);
+    }
+    if (data.productTags) {
+      const tagsField = getProductTagsInput();
+      if (tagsField) {
+        typeTags(tagsField, data.productTags);
+        await sleep(800);
+      }
+    }
+    if (data.quantity && data.quantity > 1) {
+      const qtyField = getQuantityInput();
+      if (qtyField) typeIntoField(qtyField, data.quantity.toString());
+    }
+
+    // 4. Location
+    updateFloatingBox("Lister Pro: AI Auto-Filling", `Setting location to ${data.location || "Default US"}...`, 80, steps, 3);
+    if (data.location) {
+      await runPhase3(data.location);
+    }
+
+    // 5. Save Draft
+    // Show AI Publish box after location
+    const antiBanDelay = Math.floor(Math.random() * 5000) + 5000; // 5-10 second random delay
+    let countdown = antiBanDelay / 1000;
+    
+    while (countdown > 0) {
+      updateFloatingBox("Lister Pro: AI Publish", `Auto-saving draft in ${countdown.toFixed(1)}s (Anti-Ban delay)...`, 90, steps, 4);
+      await sleep(500);
+      countdown -= 0.5;
+    }
+
+    updateFloatingBox("Lister Pro: AI Publish", "Saving Draft and closing...", 98, steps, 4);
+    const saveOk = await clickSaveDraft();
+    if (saveOk) {
+      await sleep(3000);
+      chrome.runtime.sendMessage({ action: "DRAFT_SAVED" });
+    } else {
+      updateFloatingBox("Lister Pro: Save Failed", "Please click Save Draft manually.", 100, steps, 4);
+      chrome.runtime.sendMessage({
+        action: "REPORT_STATUS",
+        payload: { phase: 1, status: "error", message: "Save Draft button missing!" }
+      });
+    }
 
   } catch (err) {
-    chrome.runtime.sendMessage({ 
-      action: "AUTOFILL_STATUS", 
-      payload: { phase: 3, status: "error", message: err.message } 
+    updateFloatingBox("Lister Pro: Error", err.message, 100, steps, -1);
+    chrome.runtime.sendMessage({
+      action: "REPORT_STATUS",
+      payload: { phase: 1, status: "error", message: err.message }
     });
   }
 }
 
-// Message listener
+// Init Content script
+chrome.runtime.sendMessage({ action: "GET_TAB_ID" }, (res) => {
+  const tabId = res ? res.tabId : null;
+  if (!tabId) return;
+
+  const url = window.location.href;
+  
+  if (url.includes("/marketplace/create/item")) {
+    const key = `autofill_${tabId}`;
+    chrome.storage.local.get([key, "pendingAutofill"], (data) => {
+      // Priority 1: Batch payload for this tab
+      if (data[key]) {
+        const payload = data[key];
+        chrome.storage.local.remove(key); // clean up
+        runPhase1(payload);
+      }
+      // Priority 2: Single tab pending autofill
+      else if (data.pendingAutofill) {
+        const payload = data.pendingAutofill;
+        chrome.storage.local.remove("pendingAutofill");
+        runPhase1(payload);
+      }
+    });
+  } else if (url.includes("/marketplace/selling")) {
+    // Inject Auto Location AI box on selling page
+    updateFloatingBox(
+      "Auto Location AI",
+      "Monitoring Selling dashboard. Rapid Lister Pro is active and ready.",
+      100
+    );
+    
+    // Add custom buttons or instructions inside selling dashboard box
+    if (floatingUIBox) {
+      const container = document.createElement("div");
+      container.style.marginTop = "12px";
+      container.innerHTML = `
+        <button class="rl-btn" id="rl-create-btn">⚡ Create New Listing</button>
+      `;
+      floatingUIBox.appendChild(container);
+      
+      document.getElementById("rl-create-btn").addEventListener("click", () => {
+        window.location.href = "https://www.facebook.com/marketplace/create/item";
+      });
+    }
+  }
+});
+
+// Listener for manual commands from popup
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.action === "START_AUTOFILL") {
     runPhase1(message.payload);
     sendResponse({ status: "started" });
-  } else if (message.action === "DETECT_DRAFT") {
-    runPhase2();
-    sendResponse({ status: "started" });
   } else if (message.action === "SET_LOCATION") {
-    runPhase3(message.payload.location);
-    sendResponse({ status: "started" });
+    runPhase3(message.payload.location).then(ok => {
+      sendResponse({ status: ok ? "success" : "failed" });
+    });
+    return true;
   }
 });
-
-// Auto-run on load
-(async () => {
-  const pending = await chrome.storage.local.get(['pendingAutofill', 'pendingResumeDraft']);
-  
-  if (pending.pendingAutofill) {
-    const data = pending.pendingAutofill;
-    // Don't remove pendingAutofill — let all tabs read it.
-    // Background script will clean it up after all tabs are done.
-    await sleep(1500);
-    runPhase1(data);
-  } else if (pending.pendingResumeDraft) {
-    await chrome.storage.local.remove('pendingResumeDraft');
-    await sleep(1500);
-    runPhase2();
-  }
-})();

@@ -24,8 +24,8 @@ document.addEventListener("DOMContentLoaded", () => {
   const imagePreviewGrid = document.getElementById("image-preview-grid");
 
   // Actions
-  const saveDraftBtn = document.getElementById("save-draft-btn");
   const startAutofillBtn = document.getElementById("start-autofill-btn");
+  const startBulkBtn = document.getElementById("start-bulk-btn");
   const clearAllBtn = document.getElementById("clear-all-btn");
   const detectDraftsBtn = document.getElementById("detect-drafts-btn");
   const draftListContainer = document.getElementById("draft-list-container");
@@ -35,6 +35,10 @@ document.addEventListener("DOMContentLoaded", () => {
   const applyLocationBtn = document.getElementById("apply-location-btn");
   const tabsToOpenInput = document.getElementById("tabs-to-open");
   
+  const bulkProgressContainer = document.getElementById("bulk-progress-container");
+  const bulkProgressVal = document.getElementById("bulk-progress-val");
+  const bulkProgressFill = document.getElementById("bulk-progress-fill");
+
   const statusDot = document.getElementById("status-dot");
   const statusTextLabel = document.getElementById("status-text-label");
   const statusMessage = document.getElementById("status-message");
@@ -190,10 +194,6 @@ document.addEventListener("DOMContentLoaded", () => {
     });
 
   // Explicit buttons
-  saveDraftBtn.addEventListener("click", async () => {
-    await saveFormData();
-    showStatus("success", "Listing data saved successfully.");
-  });
 
   clearAllBtn.addEventListener("click", async () => {
     titleInput.value = "";
@@ -298,7 +298,33 @@ document.addEventListener("DOMContentLoaded", () => {
       showStatus("error", "A Title is required to start.");
       return;
     }
+    // Single listing mode: Reset bulk progress UI and start 1 listing
+    bulkProgressContainer.style.display = "none";
+    chrome.storage.local.set({ bulkImageIndex: 0 });
     sendMessageToTab("START_AUTOFILL", data);
+  });
+
+  startBulkBtn.addEventListener("click", () => {
+    const data = getFormData();
+    if (!data.title) {
+      showStatus("error", "A Title is required to start.");
+      return;
+    }
+    const count = Number(tabsToOpenInput.value || 10);
+    showStatus("running", `Initiating bulk auto-fill for ${count} listings...`);
+    
+    // Show progress bar
+    bulkProgressContainer.style.display = "block";
+    bulkProgressVal.textContent = `0/${count}`;
+    bulkProgressFill.style.width = "0%";
+
+    chrome.runtime.sendMessage({
+      action: "START_BULK_LISTING",
+      count: count,
+      payload: data
+    }, (response) => {
+      showStatus("success", `Bulk queue started for ${count} listings.`);
+    });
   });
 
   detectDraftsBtn.addEventListener("click", () => {
@@ -320,13 +346,25 @@ document.addEventListener("DOMContentLoaded", () => {
     sendMessageToTab("SET_LOCATION", { location });
   });
 
-  // Listen for progress reports from content script
+  // Listen for progress reports from background/tabs
   chrome.runtime.onMessage.addListener((message) => {
     if (message.action === "AUTOFILL_STATUS") {
       const { phase, status, message: text } = message.payload;
       showStatus(status, `[Phase ${phase}] ${text}`);
       if (phase === 2 && status === "done") {
         updateDraftListUI();
+      }
+    } else if (message.action === "BULK_PROGRESS_UPDATE") {
+      const { active, completed, total, percentage } = message.payload;
+      if (active) {
+        bulkProgressContainer.style.display = "block";
+        bulkProgressVal.textContent = `${completed}/${total}`;
+        bulkProgressFill.style.width = `${percentage}%`;
+        showStatus("running", `Bulk Lister Active: ${completed}/${total} completed.`);
+      } else {
+        bulkProgressVal.textContent = `${completed}/${total}`;
+        bulkProgressFill.style.width = `100%`;
+        showStatus("success", `Bulk Lister finished! All ${total} tasks processed.`);
       }
     }
   });
@@ -356,4 +394,14 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // Start
   loadFormData();
+  
+  // Sync bulk progress on load
+  chrome.runtime.sendMessage({ action: "GET_BULK_PROGRESS" }, (progress) => {
+    if (progress && progress.active) {
+      bulkProgressContainer.style.display = "block";
+      bulkProgressVal.textContent = `${progress.completed}/${progress.total}`;
+      bulkProgressFill.style.width = `${progress.percentage}%`;
+      showStatus("running", `Bulk Lister Active: ${progress.completed}/${progress.total} completed.`);
+    }
+  });
 });
