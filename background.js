@@ -1,212 +1,180 @@
-// Rapid Lister Pro - Background Service Worker
-// Developed by AB Rehman Malik
+const CONFIG = {
+  BATCH_SIZE: 10,
+  TAB_OPEN_DELAY: 2000,
+  BATCH_BREAK: 30000,
+  DRAFT_CLOSE_DELAY: 3000,
+  USA_LOCATIONS: [
+    "New York, NY", "Los Angeles, CA", "Chicago, IL", "Houston, TX",
+    "Phoenix, AZ", "Philadelphia, PA", "San Antonio, TX", "San Diego, CA",
+    "Dallas, TX", "San Jose, CA", "Austin, TX", "Jacksonville, FL",
+    "Fort Worth, TX", "Columbus, OH", "Charlotte, NC", "Indianapolis, IN",
+    "San Francisco, CA", "Seattle, WA", "Denver, CO", "Washington, DC",
+    "Boston, MA", "El Paso, TX", "Nashville, TN", "Detroit, MI",
+    "Oklahoma City, OK", "Portland, OR", "Las Vegas, NV", "Louisville, KY",
+    "Baltimore, MD", "Milwaukee, WI", "Albuquerque, NM", "Tucson, AZ",
+    "Fresno, CA", "Sacramento, CA", "Mesa, AZ", "Kansas City, MO",
+    "Atlanta, GA", "Long Beach, CA", "Colorado Springs, CO", "Raleigh, NC"
+  ]
+};
 
-const USA_LOCATIONS = [
-  "New York, NY", "Los Angeles, CA", "Chicago, IL", "Houston, TX", "Phoenix, AZ",
-  "Philadelphia, PA", "San Antonio, TX", "San Diego, CA", "Dallas, TX", "San Jose, CA",
-  "Austin, TX", "Jacksonville, FL", "Fort Worth, TX", "Columbus, OH", "Charlotte, NC",
-  "Indianapolis, IN", "San Francisco, CA", "Seattle, WA", "Denver, CO", "Washington, DC",
-  "Boston, MA", "El Paso, TX", "Nashville, TN", "Detroit, MI", "Oklahoma City, OK"
-];
-
-// Queue state
-let listingQueue = [];
-let activeTabs = new Map(); // tabId -> { index, startTime }
+let masterQueue = [];
+let activeTabIds = new Set();
 let completedCount = 0;
-let totalToList = 0;
+let totalCount = 0;
 let isProcessing = false;
-let currentBatchCount = 0;
+
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  if (message.action === "OPEN_TAB") {
-    chrome.tabs.create({ url: message.url }, (tab) => {
-      sendResponse({ status: "success", tabId: tab.id });
-    });
-    return true;
-  }
-
-  if (message.action === "START_BULK_LISTING") {
-    const { count, payload } = message;
-    totalToList = count;
-    completedCount = 0;
-    listingQueue = [];
-    activeTabs.clear();
-    isProcessing = true;
-
-    // Build the queue
-    for (let i = 0; i < count; i++) {
-      const location = USA_LOCATIONS[i % USA_LOCATIONS.length];
-      listingQueue.push({
-        index: i,
-        payload: {
-          ...payload,
-          location: location,
-          imageIndex: i
-        }
-      });
-    }
-
-    // Save initial progress
-    updateProgressStorage();
-    
-    // Start processing queue
-    processNextBatch();
-
-    sendResponse({ status: "success", total: count });
-    return true;
-  }
-
-  if (message.action === "GET_BULK_PROGRESS") {
-    chrome.storage.local.get(["bulkProgress"], (res) => {
-      sendResponse(res.bulkProgress || { active: false });
-    });
-    return true;
-  }
-
   if (message.action === "GET_TAB_ID") {
     sendResponse({ tabId: sender.tab ? sender.tab.id : null });
     return true;
   }
 
-  if (message.action === "DRAFT_SAVED") {
-    const tabId = sender.tab ? sender.tab.id : null;
-    if (tabId && activeTabs.has(tabId)) {
-      activeTabs.delete(tabId);
-      completedCount++;
-      updateProgressStorage();
-      
-      // Close the tab
-      chrome.tabs.remove(tabId);
-
-      // Check if current batch is done
-      checkBatchCompletion();
+  if (message.action === "START_BULK_LISTING") {
+    const { count, payload } = message;
+    totalCount = count;
+    completedCount = 0;
+    
+    masterQueue = [];
+    for (let i = 0; i < count; i++) {
+      masterQueue.push({
+        ...payload,
+        location: CONFIG.USA_LOCATIONS[i % CONFIG.USA_LOCATIONS.length],
+        tabIndex: i
+      });
     }
-    sendResponse({ status: "acknowledged" });
-    return true;
-  }
-
-  if (message.action === "CLOSE_CURRENT_TAB") {
-    if (sender.tab && sender.tab.id) {
-      const tabId = sender.tab.id;
-      if (activeTabs.has(tabId)) {
-        activeTabs.delete(tabId);
-        // Note: Count it as closed/completed
-        completedCount++;
-        updateProgressStorage();
-      }
-      chrome.tabs.remove(tabId);
-      checkBatchCompletion();
-    }
-    sendResponse({ status: "success" });
-    return true;
-  }
-
-  if (message.action === "REPORT_STATUS") {
-    // Forward status from tab to popup for progress bar
-    chrome.runtime.sendMessage({
-      action: "AUTOFILL_STATUS",
-      payload: message.payload
+    
+    chrome.storage.local.set({
+      listingQueue: masterQueue,
+      totalListings: totalCount,
+      completedListings: 0,
+      currentPhase: 1
     });
+    
+    isProcessing = true;
+    processBatches();
+    
+    sendResponse({ 
+      status: "success", 
+      totalQueued: count,
+      batches: Math.ceil(count / CONFIG.BATCH_SIZE)
+    });
+    return true;
+  }
+  
+  if (message.action === "DRAFT_SAVED") {
+    const tabId = sender.tab?.id;
+    if (tabId) {
+      activeTabIds.delete(tabId);
+      completedCount++;
+      chrome.storage.local.set({ completedListings: completedCount });
+      
+      // Notify popups
+      chrome.runtime.sendMessage({
+        action: "BULK_PROGRESS_UPDATE",
+        payload: {
+          active: isProcessing,
+          completed: completedCount,
+          total: totalCount,
+          percentage: totalCount > 0 ? Math.round((completedCount / totalCount) * 100) : 0
+        }
+      });
+
+      setTimeout(() => {
+        chrome.tabs.remove(tabId).catch(() => {});
+      }, CONFIG.DRAFT_CLOSE_DELAY);
+    }
     sendResponse({ status: "ok" });
     return true;
   }
-});
-
-// Update progress in storage and notify popup
-function updateProgressStorage() {
-  const progress = {
-    active: isProcessing,
-    completed: completedCount,
-    total: totalToList,
-    percentage: totalToList > 0 ? Math.round((completedCount / totalToList) * 100) : 0
-  };
-  chrome.storage.local.set({ bulkProgress: progress });
-  chrome.runtime.sendMessage({
-    action: "BULK_PROGRESS_UPDATE",
-    payload: progress
-  });
-}
-
-// Process the next batch of up to 10 tabs
-async function processNextBatch() {
-  if (listingQueue.length === 0) {
+  
+  if (message.action === "STOP_ALL") {
     isProcessing = false;
-    updateProgressStorage();
-    console.log("All listing tasks completed!");
-    return;
+    masterQueue = [];
+    activeTabIds.forEach(id => chrome.tabs.remove(id).catch(() => {}));
+    activeTabIds.clear();
+    chrome.storage.local.set({ currentPhase: 0 });
+    sendResponse({ status: "stopped" });
+    return true;
   }
 
-  // Get up to 10 items
-  const batch = listingQueue.splice(0, 10);
-  currentBatchCount = batch.length;
-  console.log(`Starting new batch of ${currentBatchCount} tabs...`);
+  if (message.action === "GET_BULK_PROGRESS") {
+    sendResponse({
+      active: isProcessing,
+      completed: completedCount,
+      total: totalCount,
+      percentage: totalCount > 0 ? Math.round((completedCount / totalCount) * 100) : 0
+    });
+    return true;
+  }
+});
 
-  // Setup stuck tab alarm
-  chrome.alarms.create("stuck_tab_cleanup", { delayInMinutes: 2 });
-
-  for (let i = 0; i < batch.length; i++) {
-    const item = batch[i];
+async function processBatches() {
+  while (masterQueue.length > 0 && isProcessing) {
+    const currentBatch = masterQueue.splice(0, CONFIG.BATCH_SIZE);
+    console.log(`[BATCH] Starting ${currentBatch.length} tabs`);
     
-    // Anti-ban: 2-second delay between opening each tab in the batch
-    await new Promise(resolve => setTimeout(resolve, i * 2000));
-
-    chrome.tabs.create({
-      url: "https://www.facebook.com/marketplace/create/item",
-      active: false // background tabs to save RAM
-    }, (tab) => {
-      activeTabs.set(tab.id, {
-        index: item.index,
-        startTime: Date.now(),
-        payload: item.payload
+    for (const item of currentBatch) {
+      if (!isProcessing) break;
+      
+      await chrome.storage.local.set({ 
+        pendingAutofill: item,
+        currentTabIndex: item.tabIndex 
       });
       
-      // Save info so content script in this tab knows what to fill
-      const key = `autofill_${tab.id}`;
-      chrome.storage.local.set({ [key]: item.payload });
+      const tab = await chrome.tabs.create({ 
+        url: "https://www.facebook.com/marketplace/create/item",
+        active: false
+      });
+      
+      activeTabIds.add(tab.id);
+      await sleep(CONFIG.TAB_OPEN_DELAY);
+    }
+    
+    // Watchdog wait loop (wait up to 5 minutes)
+    let waitTime = 0;
+    while (activeTabIds.size > 0 && waitTime < 300000 && isProcessing) {
+      await sleep(2000);
+      waitTime += 2000;
+    }
+    
+    for (const tabId of activeTabIds) {
+      chrome.tabs.remove(tabId).catch(() => {});
+    }
+    activeTabIds.clear();
+    
+    if (masterQueue.length > 0 && isProcessing) {
+      console.log(`[BATCH] Break ${CONFIG.BATCH_BREAK/1000}s`);
+      await sleep(CONFIG.BATCH_BREAK);
+    }
+  }
+  
+  if (isProcessing) {
+    isProcessing = false;
+    console.log("[ALL BATCHES COMPLETE] Starting Phase 2...");
+    chrome.storage.local.set({ currentPhase: 2 });
+    setTimeout(startPhase2, 5000);
+  }
+}
+
+async function startPhase2() {
+  const tab = await chrome.tabs.create({
+    url: "https://www.facebook.com/marketplace/you/selling",
+    active: true
+  });
+  
+  setTimeout(() => {
+    chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      func: injectAutoLocationUI
     });
-  }
+  }, 5000);
 }
 
-// Check if all tabs in the active batch are done
-function checkBatchCompletion() {
-  if (activeTabs.size === 0 && isProcessing) {
-    // Clear cleanup alarm
-    chrome.alarms.clear("stuck_tab_cleanup");
-
-    if (listingQueue.length > 0) {
-      console.log("Batch completed. Taking a 30-second anti-ban break...");
-      // Anti-ban: 30-second break between batches
-      setTimeout(() => {
-        processNextBatch();
-      }, 30000);
-    } else {
-      isProcessing = false;
-      updateProgressStorage();
-      console.log("All batches finished!");
-    }
-  }
+function injectAutoLocationUI() {
+  console.log("[Lister Pro] Injecting Auto Location dashboard UI");
+  // The content script on the page will automatically pick up phase 2 and display it.
 }
-
-// Watch for manual tab closure
-chrome.tabs.onRemoved.addListener((tabId) => {
-  if (activeTabs.has(tabId)) {
-    activeTabs.delete(tabId);
-    completedCount++;
-    updateProgressStorage();
-    checkBatchCompletion();
-  }
-});
-
-// Stuck tabs alarm handler
-chrome.alarms.onAlarm.addListener((alarm) => {
-  if (alarm.name === "stuck_tab_cleanup") {
-    console.log("Alarm triggered: cleaning up stuck tabs...");
-    const now = Date.now();
-    for (const [tabId, data] of activeTabs.entries()) {
-      if (now - data.startTime > 110000) { // close if running > 110 seconds
-        console.warn(`Tab ${tabId} is stuck. Removing.`);
-        chrome.tabs.remove(tabId);
-      }
-    }
-  }
-});

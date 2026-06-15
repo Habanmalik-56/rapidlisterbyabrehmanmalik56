@@ -1,4 +1,5 @@
-// Updated Popup Logic for Lister Pro
+// Rapid Lister Pro - Popup Logic
+// Developed by AB Rehman Malik
 
 document.addEventListener("DOMContentLoaded", () => {
   // Navigation
@@ -86,7 +87,6 @@ document.addEventListener("DOMContentLoaded", () => {
         selectedImages.push(event.target.result);
         loadedCount++;
         if (loadedCount === files.length || selectedImages.length > 50) {
-          // Render and save
           renderImagePreviews();
           saveFormData();
         }
@@ -94,7 +94,6 @@ document.addEventListener("DOMContentLoaded", () => {
       reader.readAsDataURL(file);
     });
     
-    // Reset input so user can choose same file again
     productImagesInput.value = "";
   });
 
@@ -193,8 +192,6 @@ document.addEventListener("DOMContentLoaded", () => {
       input.addEventListener("change", triggerAutoSave);
     });
 
-  // Explicit buttons
-
   clearAllBtn.addEventListener("click", async () => {
     titleInput.value = "";
     priceInput.value = "";
@@ -224,26 +221,6 @@ document.addEventListener("DOMContentLoaded", () => {
         return;
       }
 
-      if (action === "START_AUTOFILL") {
-        const count = Number(tabsToOpenInput.value || 1);
-        // Reset image index counter so the tabs consume images starting from index 0
-        await chrome.storage.local.set({ bulkImageIndex: 0 });
-
-        if (count > 1) {
-          showStatus("running", `Opening ${count} tabs concurrently for bulk automation...`);
-          chrome.runtime.sendMessage({
-            action: "OPEN_BULK_TABS",
-            count: count,
-            url: "https://www.facebook.com/marketplace/create/item",
-            payload: payload
-          }, (response) => {
-            showStatus("success", `Opened ${count} listing creator tabs!`);
-            // Background script will clean up pendingAutofill after ALL tabs close
-          });
-          return;
-        }
-      }
-
       if (!tab.url || !tab.url.includes("facebook.com")) {
         showStatus("error", "Please open Facebook Marketplace first.");
         return;
@@ -256,8 +233,6 @@ document.addEventListener("DOMContentLoaded", () => {
             chrome.tabs.update(tab.id, { url: "https://www.facebook.com/marketplace/create/item" });
             if (action === "START_AUTOFILL") {
               chrome.storage.local.set({ pendingAutofill: payload });
-            } else if (action === "DETECT_DRAFT") {
-              chrome.storage.local.set({ pendingResumeDraft: true });
             }
           }
         } else {
@@ -298,7 +273,6 @@ document.addEventListener("DOMContentLoaded", () => {
       showStatus("error", "A Title is required to start.");
       return;
     }
-    // Single listing mode: Reset bulk progress UI and start 1 listing
     bulkProgressContainer.style.display = "none";
     chrome.storage.local.set({ bulkImageIndex: 0 });
     sendMessageToTab("START_AUTOFILL", data);
@@ -313,7 +287,6 @@ document.addEventListener("DOMContentLoaded", () => {
     const count = Number(tabsToOpenInput.value || 10);
     showStatus("running", `Initiating bulk auto-fill for ${count} listings...`);
     
-    // Show progress bar
     bulkProgressContainer.style.display = "block";
     bulkProgressVal.textContent = `0/${count}`;
     bulkProgressFill.style.width = "0%";
